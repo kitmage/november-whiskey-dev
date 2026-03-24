@@ -8,7 +8,7 @@ Configure Client
 ```python
 from hubspot import HubSpot
 
-api_client = HubSpot(access_token=$HUBSPOT_ACCESS_TOKEN)
+api_client = HubSpot(access_token=$HUBSPOT_TOKEN)
 ```
 
 Get Audit Logs
