@@ -133,25 +133,6 @@ def create_suppression_note_for_contact(contact_id):
 
     return note
 
-def remove_contact_from_list(list_id, contact_id):
-    """
-    Best-effort removal from list.
-
-    Uses legacy contacts v1 lists API:
-      POST /contacts/v1/lists/{listId}/remove
-    with body:
-      { "vids": [contact_id] }
-
-    NOTE: Requires contacts-lists-* scopes on the private app.
-    """
-    url = f"{BASE_URL}/contacts/v1/lists/{list_id}/remove"
-    payload = {"vids": [int(contact_id)]}
-    resp = requests.post(url, headers=headers(), json=payload, timeout=30)
-
-    if resp.status_code >= 400:
-        print(f"[WARN] List remove error for contact {contact_id} from list {list_id}: {resp.text}")
-        # Do not raise; continue script
-
 # ----------------------------
 # Batch read suppression property & filter
 # ----------------------------
@@ -162,7 +143,6 @@ def filter_suppressed_contacts(contact_ids):
 
     For each suppressed contact:
       - Add a note to the contact (owned by NOTE_OWNER_ID if set).
-      - Attempt to remove the contact from the segment/list `LIST_ID`.
 
     Contacts missing the property are treated as NOT suppressed.
     """
@@ -192,19 +172,12 @@ def filter_suppressed_contacts(contact_ids):
         for cid in chunk:
             val = suppression_map.get(str(cid))
             if str(val).lower() == "true":
-                # Suppressed: create a note and attempt removal from list
+                # Suppressed: create a note
                 try:
                     print(f"[SUPPRESS] Contact {cid}: creating note (owner={NOTE_OWNER_ID})...")
                     create_suppression_note_for_contact(cid)
                 except Exception as e:
                     print(f"[WARN] Failed to create note for contact {cid}: {e}")
-
-                try:
-                    print(f"[SUPPRESS] Contact {cid}: removing from list {LIST_ID}...")
-                    remove_contact_from_list(LIST_ID, cid)
-                except Exception as e:
-                    print(f"[WARN] Failed to remove contact {cid} from list {LIST_ID}: {e}")
-
                 # Do NOT add to allowed list
                 continue
 
