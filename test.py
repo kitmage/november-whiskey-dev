@@ -98,7 +98,10 @@ def associate_note_to_contact(note_id, contact_id):
         "associationType": "note_to_contact"
     }
     resp = requests.post(url, headers=headers(), json=payload, timeout=30)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        print(f"[DEBUG] Association error body for note {note_id} -> contact {contact_id}: {resp.text}")
+        resp.raise_for_status()
+
 
 def create_suppression_note_for_contact(contact_id):
     """
@@ -119,7 +122,10 @@ def create_suppression_note_for_contact(contact_id):
     }
 
     resp = requests.post(url, headers=headers(), json=payload, timeout=30)
-    resp.raise_for_status()
+    if resp.status_code >= 400:
+        print(f"[DEBUG] Note create error body for contact {contact_id}: {resp.text}")
+        resp.raise_for_status()
+
     note = resp.json()
     note_id = note.get("id")
 
@@ -128,6 +134,7 @@ def create_suppression_note_for_contact(contact_id):
         associate_note_to_contact(note_id, contact_id)
 
     return note
+
 
 def remove_contact_from_list(list_id, contact_id):
     """
@@ -142,8 +149,8 @@ def remove_contact_from_list(list_id, contact_id):
     payload = {"vids": [int(contact_id)]}
     resp = requests.post(url, headers=headers(), json=payload, timeout=30)
 
-    # Typical responses: 200 OK. If 404 on list or contact, log & continue.
     if resp.status_code >= 400:
+        print(f"[DEBUG] List remove error for contact {contact_id} from list {list_id}: {resp.text}")
         resp.raise_for_status()
 
 # ----------------------------
