@@ -113,6 +113,8 @@ def create_suppression_note_for_contact(contact_id):
 
     properties = {
         "hs_note_body": SUPPRESSION_NOTE_BODY,
+        # hs_timestamp is required in your portal
+        "hs_timestamp": int(time.time() * 1000),
     }
     if NOTE_OWNER_ID:
         properties["hubspot_owner_id"] = NOTE_OWNER_ID
