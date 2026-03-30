@@ -22,6 +22,8 @@ START_TIMESTAMP_MS = None  # e.g. 1741392000000
 LIST_PAGE_LIMIT = 250
 CONTACT_BATCH_SIZE = 100
 
+# Suppression property
+SUPPRESSION_PROPERTY = "do_not_send_pci"
 
 # ----------------------------
 # Helpers
@@ -32,18 +34,20 @@ def headers():
         "Content-Type": "application/json",
     }
 
-
 def get_json(url, params=None):
     resp = requests.get(url, headers=headers(), params=params, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
-
 # ----------------------------
-# Step 1: Get list memberships
+# Get list memberships
 # Docs: GET /crm/v3/lists/{listId}/memberships
 # ----------------------------
 def get_all_list_member_ids(list_id):
+    """
+    Returns list of contact IDs that are list members AND
+    whose SUPPRESSION_PROPERTY is NOT equal to the string "true".
+    """
     member_ids = []
     after = None
 
@@ -55,10 +59,24 @@ def get_all_list_member_ids(list_id):
         url = f"{BASE_URL}/crm/v3/lists/{list_id}/memberships"
         data = get_json(url, params=params)
 
+        page_ids = []
         for row in data.get("results", []):
             record_id = row.get("recordId")
             if record_id:
-                member_ids.append(str(record_id))
+                page_ids.append(str(record_id))
+
+        # If we got some IDs from this page, batch-read suppression property
+        if page_ids:
+            suppression_map = get_suppression_flags(page_ids)
+
+            for cid in page_ids:
+                # Default to not suppressed if property missing/None
+                suppressed_val = suppression_map.get(cid)
+                if str(suppressed_val).lower() == "true":
+                    # Skip suppressed contacts
+                    continue
+                # Otherwise include
+                member_ids.append(cid)
 
         paging = data.get("paging", {})
         next_page = paging.get("next", {})
@@ -68,16 +86,47 @@ def get_all_list_member_ids(list_id):
 
     return member_ids
 
-
 # ----------------------------
-# Step 2: Batch read contacts to get email addresses
-# Uses CRM batch read for contacts
+# Batch read suppression property for contacts
 # ----------------------------
 def batch_chunks(items, size):
     for i in range(0, len(items), size):
         yield items[i:i + size]
 
+def get_suppression_flags(contact_ids):
+    """
+    Returns:
+      {
+        "123": "true" | "false" | None,
+        ...
+      }
+    """
+    result = {}
+    url = f"{BASE_URL}/crm/v3/objects/contacts/batch/read"
 
+    for chunk in batch_chunks(contact_ids, CONTACT_BATCH_SIZE):
+        payload = {
+            "properties": [SUPPRESSION_PROPERTY],
+            "inputs": [{"id": cid} for cid in chunk],
+        }
+
+        resp = requests.post(url, headers=headers(), json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        for row in data.get("results", []):
+            cid = str(row.get("id"))
+            prop_value = row.get("properties", {}).get(SUPPRESSION_PROPERTY)
+            result[cid] = prop_value
+
+        time.sleep(0.05)
+
+    return result
+
+# ----------------------------
+# Batch read contacts to get email addresses
+# Uses CRM batch read for contacts
+# ----------------------------
 def get_contact_emails(contact_ids):
     """
     Returns:
@@ -111,9 +160,8 @@ def get_contact_emails(contact_ids):
 
     return result
 
-
 # ----------------------------
-# Step 3: Pull marketing email events
+# Pull marketing email events
 # Docs: GET /email/public/v1/events
 # Can query by recipient and/or campaignId
 # ----------------------------
@@ -162,9 +210,8 @@ def get_email_events_for_recipient(recipient_email, campaign_id=None, start_time
 
     return events
 
-
 # ----------------------------
-# Step 4: Aggregate opens
+# Aggregate opens
 # ----------------------------
 def aggregate_opens(contact_email_map, campaign_ids=None, start_timestamp_ms=None):
     """
@@ -204,7 +251,6 @@ def aggregate_opens(contact_email_map, campaign_ids=None, start_timestamp_ms=Non
 
     return opens
 
-
 # ----------------------------
 # Optional: Resolve campaign metadata
 # Docs: GET /email/public/v1/campaigns/{campaign_id}
@@ -213,7 +259,6 @@ def get_campaign_details(campaign_id):
     url = f"{BASE_URL}/email/public/v1/campaigns/{campaign_id}"
     return get_json(url)
 
-
 # ----------------------------
 # Main
 # ----------------------------
@@ -221,9 +266,9 @@ def main():
     if HUBSPOT_TOKEN in (None, "", "$HUBSPOT_TOKEN"):
         raise RuntimeError("Set HUBSPOT_TOKEN in your environment before running.")
 
-    print(f"Fetching members of list {LIST_ID}...")
+    print(f"Fetching members of list {LIST_ID} (excluding {SUPPRESSION_PROPERTY} == 'true')...")
     contact_ids = get_all_list_member_ids(LIST_ID)
-    print(f"Found {len(contact_ids)} list members")
+    print(f"Found {len(contact_ids)} list members after suppression check")
 
     print("Fetching contact emails...")
     contact_email_map = get_contact_emails(contact_ids)
@@ -239,7 +284,6 @@ def main():
     print("\nrecipient_email,emailCampaignId,open_count")
     for (recipient_email, email_campaign_id), count in sorted(opens.items()):
         print(f"{recipient_email},{email_campaign_id},{count}")
-
 
 if __name__ == "__main__":
     main()
