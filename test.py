@@ -88,11 +88,24 @@ def get_all_list_member_ids(list_id):
 # ----------------------------
 # Actions for suppressed contacts
 # ----------------------------
+def associate_note_to_contact(note_id, contact_id):
+    """
+    Associate a note with a contact using v4 associations API.
+    associationType expected: "note_to_contact"
+    """
+    url = f"{BASE_URL}/crm/v4/objects/notes/{note_id}/associations/contacts/{contact_id}"
+    payload = {
+        "associationType": "note_to_contact"
+    }
+    resp = requests.post(url, headers=headers(), json=payload, timeout=30)
+    resp.raise_for_status()
+
 def create_suppression_note_for_contact(contact_id):
     """
     Create a note on the contact explaining why they were removed.
     Owner is set from NOTE_OWNER_ID (HUBSPOT_USER_ID env) if available.
     """
+    # 1) Create the note object
     url = f"{BASE_URL}/crm/v3/objects/notes"
 
     properties = {
@@ -102,33 +115,35 @@ def create_suppression_note_for_contact(contact_id):
         properties["hubspot_owner_id"] = NOTE_OWNER_ID
 
     payload = {
-        "properties": properties,
-        "associations": [
-            {
-                "to": {"id": str(contact_id)},
-                "types": [
-                    {
-                        "associationCategory": "HUBSPOT_DEFINED",
-                        "associationTypeId": 202,  # contact <-> note
-                    }
-                ],
-            }
-        ],
+        "properties": properties
     }
 
     resp = requests.post(url, headers=headers(), json=payload, timeout=30)
     resp.raise_for_status()
-    return resp.json()
+    note = resp.json()
+    note_id = note.get("id")
+
+    if note_id:
+        # 2) Associate note to contact
+        associate_note_to_contact(note_id, contact_id)
+
+    return note
 
 def remove_contact_from_list(list_id, contact_id):
     """
     Remove a contact from the specified list/segment.
-    Docs: DELETE /crm/v3/lists/{listId}/memberships/{recordId}
+
+    Uses legacy contacts v1 lists API:
+      POST /contacts/v1/lists/{listId}/remove
+    with body:
+      { "vids": [contact_id] }
     """
-    url = f"{BASE_URL}/crm/v3/lists/{list_id}/memberships/{contact_id}"
-    resp = requests.delete(url, headers=headers(), timeout=30)
-    # For DELETE, 204 or 200 is acceptable; raise otherwise.
-    if resp.status_code not in (200, 204):
+    url = f"{BASE_URL}/contacts/v1/lists/{list_id}/remove"
+    payload = {"vids": [int(contact_id)]}
+    resp = requests.post(url, headers=headers(), json=payload, timeout=30)
+
+    # Typical responses: 200 OK. If 404 on list or contact, log & continue.
+    if resp.status_code >= 400:
         resp.raise_for_status()
 
 # ----------------------------
@@ -341,7 +356,7 @@ def main():
         raise RuntimeError("Set HUBSPOT_TOKEN in your environment before running.")
 
     if not NOTE_OWNER_ID:
-        print("[INFO] HUBSPOT_USER_ID is not set; notes will be unassigned to a specific owner.")
+        print("[INFO] HUBSPOT_USER_ID is not set; notes will not have an explicit owner.")
 
     print(f"Fetching members of list {LIST_ID}...")
     contact_ids = get_all_list_member_ids(LIST_ID)
