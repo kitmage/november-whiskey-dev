@@ -90,18 +90,14 @@ def get_all_list_member_ids(list_id):
 # ----------------------------
 def associate_note_to_contact(note_id, contact_id):
     """
-    Associate a note with a contact using v4 associations API.
-    associationType expected: "note_to_contact"
+    Associate a note with a contact using v3 associations API.
+    PUT /crm/v3/objects/notes/{noteId}/associations/contacts/{contactId}/note_to_contact
     """
-    url = f"{BASE_URL}/crm/v4/objects/notes/{note_id}/associations/contacts/{contact_id}"
-    payload = {
-        "associationType": "note_to_contact"
-    }
-    resp = requests.post(url, headers=headers(), json=payload, timeout=30)
+    url = f"{BASE_URL}/crm/v3/objects/notes/{note_id}/associations/contacts/{contact_id}/note_to_contact"
+    resp = requests.put(url, headers=headers(), timeout=30)
     if resp.status_code >= 400:
         print(f"[DEBUG] Association error body for note {note_id} -> contact {contact_id}: {resp.text}")
         resp.raise_for_status()
-
 
 def create_suppression_note_for_contact(contact_id):
     """
@@ -137,23 +133,24 @@ def create_suppression_note_for_contact(contact_id):
 
     return note
 
-
 def remove_contact_from_list(list_id, contact_id):
     """
-    Remove a contact from the specified list/segment.
+    Best-effort removal from list.
 
     Uses legacy contacts v1 lists API:
       POST /contacts/v1/lists/{listId}/remove
     with body:
       { "vids": [contact_id] }
+
+    NOTE: Requires contacts-lists-* scopes on the private app.
     """
     url = f"{BASE_URL}/contacts/v1/lists/{list_id}/remove"
     payload = {"vids": [int(contact_id)]}
     resp = requests.post(url, headers=headers(), json=payload, timeout=30)
 
     if resp.status_code >= 400:
-        print(f"[DEBUG] List remove error for contact {contact_id} from list {list_id}: {resp.text}")
-        resp.raise_for_status()
+        print(f"[WARN] List remove error for contact {contact_id} from list {list_id}: {resp.text}")
+        # Do not raise; continue script
 
 # ----------------------------
 # Batch read suppression property & filter
@@ -165,7 +162,7 @@ def filter_suppressed_contacts(contact_ids):
 
     For each suppressed contact:
       - Add a note to the contact (owned by NOTE_OWNER_ID if set).
-      - Remove the contact from the segment/list `LIST_ID`.
+      - Attempt to remove the contact from the segment/list `LIST_ID`.
 
     Contacts missing the property are treated as NOT suppressed.
     """
@@ -195,7 +192,7 @@ def filter_suppressed_contacts(contact_ids):
         for cid in chunk:
             val = suppression_map.get(str(cid))
             if str(val).lower() == "true":
-                # Suppressed: create a note and remove from list
+                # Suppressed: create a note and attempt removal from list
                 try:
                     print(f"[SUPPRESS] Contact {cid}: creating note (owner={NOTE_OWNER_ID})...")
                     create_suppression_note_for_contact(cid)
