@@ -13,7 +13,7 @@ BASE_URL = "https://api.hubapi.com"
 # ----------------------------
 LIST_ID = 677  # HubSpot segment/list ID
 # Optional: restrict to one or more marketing email campaign IDs
-CAMPAIGN_IDS = set()  # e.g. {"123456789", "987654321"}
+CAMPAIGN_IDS = {"325784343275"}  # e.g. {"123456789", "987654321"}
 
 # Optional: only count events since a given Unix ms timestamp
 START_TIMESTAMP_MS = None  # e.g. 1741392000000
@@ -243,4 +243,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
