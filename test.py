@@ -39,14 +39,18 @@ def get_json(url, params=None):
     resp.raise_for_status()
     return resp.json()
 
+def batch_chunks(items, size):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
 # ----------------------------
 # Get list memberships
 # Docs: GET /crm/v3/lists/{listId}/memberships
 # ----------------------------
 def get_all_list_member_ids(list_id):
     """
-    Returns list of contact IDs that are list members AND
-    whose SUPPRESSION_PROPERTY is NOT equal to the string "true".
+    Returns list of contact IDs that are list members.
+    (No suppression filtering here.)
     """
     member_ids = []
     after = None
@@ -59,24 +63,10 @@ def get_all_list_member_ids(list_id):
         url = f"{BASE_URL}/crm/v3/lists/{list_id}/memberships"
         data = get_json(url, params=params)
 
-        page_ids = []
         for row in data.get("results", []):
             record_id = row.get("recordId")
             if record_id:
-                page_ids.append(str(record_id))
-
-        # If we got some IDs from this page, batch-read suppression property
-        if page_ids:
-            suppression_map = get_suppression_flags(page_ids)
-
-            for cid in page_ids:
-                # Default to not suppressed if property missing/None
-                suppressed_val = suppression_map.get(cid)
-                if str(suppressed_val).lower() == "true":
-                    # Skip suppressed contacts
-                    continue
-                # Otherwise include
-                member_ids.append(cid)
+                member_ids.append(str(record_id))
 
         paging = data.get("paging", {})
         next_page = paging.get("next", {})
@@ -87,22 +77,17 @@ def get_all_list_member_ids(list_id):
     return member_ids
 
 # ----------------------------
-# Batch read suppression property for contacts
+# Batch read suppression property & filter
 # ----------------------------
-def batch_chunks(items, size):
-    for i in range(0, len(items), size):
-        yield items[i:i + size]
+def filter_suppressed_contacts(contact_ids):
+    """
+    Takes a list of contact IDs, returns only those where
+    SUPPRESSION_PROPERTY != "true" (string, case-insensitive).
 
-def get_suppression_flags(contact_ids):
+    Contacts missing the property are treated as NOT suppressed.
     """
-    Returns:
-      {
-        "123": "true" | "false" | None,
-        ...
-      }
-    """
-    result = {}
     url = f"{BASE_URL}/crm/v3/objects/contacts/batch/read"
+    allowed_ids = []
 
     for chunk in batch_chunks(contact_ids, CONTACT_BATCH_SIZE):
         payload = {
@@ -114,14 +99,23 @@ def get_suppression_flags(contact_ids):
         resp.raise_for_status()
         data = resp.json()
 
+        # Build a map from this chunk by ID -> suppression value
+        suppression_map = {}
         for row in data.get("results", []):
             cid = str(row.get("id"))
-            prop_value = row.get("properties", {}).get(SUPPRESSION_PROPERTY)
-            result[cid] = prop_value
+            val = row.get("properties", {}).get(SUPPRESSION_PROPERTY)
+            suppression_map[cid] = val
+
+        for cid in chunk:
+            val = suppression_map.get(str(cid))
+            if str(val).lower() == "true":
+                # Suppressed, skip
+                continue
+            allowed_ids.append(str(cid))
 
         time.sleep(0.05)
 
-    return result
+    return allowed_ids
 
 # ----------------------------
 # Batch read contacts to get email addresses
@@ -266,12 +260,16 @@ def main():
     if HUBSPOT_TOKEN in (None, "", "$HUBSPOT_TOKEN"):
         raise RuntimeError("Set HUBSPOT_TOKEN in your environment before running.")
 
-    print(f"Fetching members of list {LIST_ID} (excluding {SUPPRESSION_PROPERTY} == 'true')...")
+    print(f"Fetching members of list {LIST_ID}...")
     contact_ids = get_all_list_member_ids(LIST_ID)
-    print(f"Found {len(contact_ids)} list members after suppression check")
+    print(f"Found {len(contact_ids)} list members before suppression")
+
+    print(f"Filtering out contacts where {SUPPRESSION_PROPERTY} == 'true'...")
+    filtered_ids = filter_suppressed_contacts(contact_ids)
+    print(f"{len(filtered_ids)} contacts remain after suppression filter")
 
     print("Fetching contact emails...")
-    contact_email_map = get_contact_emails(contact_ids)
+    contact_email_map = get_contact_emails(filtered_ids)
     print(f"Resolved {len(contact_email_map)} contact emails")
 
     print("Aggregating OPEN events...")
