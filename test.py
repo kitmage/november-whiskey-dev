@@ -25,6 +25,15 @@ CONTACT_BATCH_SIZE = 100
 # Suppression property
 SUPPRESSION_PROPERTY = "do_not_send_pci"
 
+# Owner for notes (from env)
+NOTE_OWNER_ID = os.getenv("HUBSPOT_USER_ID")
+
+# Note body for suppressed contacts
+SUPPRESSION_NOTE_BODY = (
+    'MikeBot noticed this contact has the "Block PCI" Property set to Yes/True, '
+    "so the contact has been removed from the PCI Nurture Sequence."
+)
+
 # ----------------------------
 # Helpers
 # ----------------------------
@@ -77,6 +86,52 @@ def get_all_list_member_ids(list_id):
     return member_ids
 
 # ----------------------------
+# Actions for suppressed contacts
+# ----------------------------
+def create_suppression_note_for_contact(contact_id):
+    """
+    Create a note on the contact explaining why they were removed.
+    Owner is set from NOTE_OWNER_ID (HUBSPOT_USER_ID env) if available.
+    """
+    url = f"{BASE_URL}/crm/v3/objects/notes"
+
+    properties = {
+        "hs_note_body": SUPPRESSION_NOTE_BODY,
+    }
+    if NOTE_OWNER_ID:
+        properties["hubspot_owner_id"] = NOTE_OWNER_ID
+
+    payload = {
+        "properties": properties,
+        "associations": [
+            {
+                "to": {"id": str(contact_id)},
+                "types": [
+                    {
+                        "associationCategory": "HUBSPOT_DEFINED",
+                        "associationTypeId": 202,  # contact <-> note
+                    }
+                ],
+            }
+        ],
+    }
+
+    resp = requests.post(url, headers=headers(), json=payload, timeout=30)
+    resp.raise_for_status()
+    return resp.json()
+
+def remove_contact_from_list(list_id, contact_id):
+    """
+    Remove a contact from the specified list/segment.
+    Docs: DELETE /crm/v3/lists/{listId}/memberships/{recordId}
+    """
+    url = f"{BASE_URL}/crm/v3/lists/{list_id}/memberships/{contact_id}"
+    resp = requests.delete(url, headers=headers(), timeout=30)
+    # For DELETE, 204 or 200 is acceptable; raise otherwise.
+    if resp.status_code not in (200, 204):
+        resp.raise_for_status()
+
+# ----------------------------
 # Batch read suppression property & filter
 # ----------------------------
 def filter_suppressed_contacts(contact_ids):
@@ -84,8 +139,15 @@ def filter_suppressed_contacts(contact_ids):
     Takes a list of contact IDs, returns only those where
     SUPPRESSION_PROPERTY != "true" (string, case-insensitive).
 
+    For each suppressed contact:
+      - Add a note to the contact (owned by NOTE_OWNER_ID if set).
+      - Remove the contact from the segment/list `LIST_ID`.
+
     Contacts missing the property are treated as NOT suppressed.
     """
+    if not contact_ids:
+        return []
+
     url = f"{BASE_URL}/crm/v3/objects/contacts/batch/read"
     allowed_ids = []
 
@@ -109,8 +171,23 @@ def filter_suppressed_contacts(contact_ids):
         for cid in chunk:
             val = suppression_map.get(str(cid))
             if str(val).lower() == "true":
-                # Suppressed, skip
+                # Suppressed: create a note and remove from list
+                try:
+                    print(f"[SUPPRESS] Contact {cid}: creating note (owner={NOTE_OWNER_ID})...")
+                    create_suppression_note_for_contact(cid)
+                except Exception as e:
+                    print(f"[WARN] Failed to create note for contact {cid}: {e}")
+
+                try:
+                    print(f"[SUPPRESS] Contact {cid}: removing from list {LIST_ID}...")
+                    remove_contact_from_list(LIST_ID, cid)
+                except Exception as e:
+                    print(f"[WARN] Failed to remove contact {cid} from list {LIST_ID}: {e}")
+
+                # Do NOT add to allowed list
                 continue
+
+            # Not suppressed, keep
             allowed_ids.append(str(cid))
 
         time.sleep(0.05)
@@ -130,6 +207,9 @@ def get_contact_emails(contact_ids):
       }
     """
     result = {}
+
+    if not contact_ids:
+        return result
 
     url = f"{BASE_URL}/crm/v3/objects/contacts/batch/read"
 
@@ -260,11 +340,14 @@ def main():
     if HUBSPOT_TOKEN in (None, "", "$HUBSPOT_TOKEN"):
         raise RuntimeError("Set HUBSPOT_TOKEN in your environment before running.")
 
+    if not NOTE_OWNER_ID:
+        print("[INFO] HUBSPOT_USER_ID is not set; notes will be unassigned to a specific owner.")
+
     print(f"Fetching members of list {LIST_ID}...")
     contact_ids = get_all_list_member_ids(LIST_ID)
     print(f"Found {len(contact_ids)} list members before suppression")
 
-    print(f"Filtering out contacts where {SUPPRESSION_PROPERTY} == 'true'...")
+    print(f"Filtering out contacts where {SUPPRESSION_PROPERTY} == 'true' and updating them...")
     filtered_ids = filter_suppressed_contacts(contact_ids)
     print(f"{len(filtered_ids)} contacts remain after suppression filter")
 
