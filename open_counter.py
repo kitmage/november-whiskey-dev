@@ -223,9 +223,28 @@ def main():
     for email_id in email_ids:
         print(f"\n=== Email ID {email_id} ===")
 
+        ###
+        # DEBUG
+        ###
         data = hs_get(f"/marketing/v3/emails/{email_id}")
-        print(json.dumps(data, indent=2))
+        
+        def find_app_fields(obj, path=""):
+            if isinstance(obj, dict):
+                for k, v in obj.items():
+                    new_path = f"{path}.{k}" if path else k
+                    if k in ("appId", "appName"):
+                        print(f"{new_path} = {v}")
+                    find_app_fields(v, new_path)
+            elif isinstance(obj, list):
+                for i, v in enumerate(obj):
+                    new_path = f"{path}[{i}]"
+                    find_app_fields(v, new_path)
+        
+        find_app_fields(data)
         sys.exit(0)
+        ###
+        # END DEBUG
+        ###
         
         ctx = get_email_campaign_context_for_email(email_id)
         app_id = ctx["appId"]
