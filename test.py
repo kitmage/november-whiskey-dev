@@ -320,12 +320,15 @@ def aggregate_opens(contact_email_map, campaign_ids=None, start_timestamp_ms=Non
     return opens
 
 # ----------------------------
-# Aggregate replies
+# Aggregate opens and replies
 # ----------------------------
-def aggregate_replies(contact_email_map, campaign_ids=None, start_timestamp_ms=None):
+def aggregate_opens_and_replies(contact_email_map, campaign_ids=None, start_timestamp_ms=None):
     """
-    Returns dict keyed by (recipient_email, emailCampaignId) -> reply_count
+    Returns two dicts:
+      opens[(recipient_email, emailCampaignId)]   -> open_count
+      replies[(recipient_email, emailCampaignId)] -> reply_count
     """
+    opens = defaultdict(int)
     replies = defaultdict(int)
 
     for _, email in contact_email_map.items():
@@ -338,7 +341,10 @@ def aggregate_replies(contact_email_map, campaign_ids=None, start_timestamp_ms=N
                     start_timestamp_ms=start_timestamp_ms,
                 )
                 for event in events:
-                    if event.get("type") in ("REPLY", "REPLIED"):  # adjust if your portal uses a different type string
+                    if event.get("type") == "OPEN":
+                        key = (email, str(event.get("emailCampaignId")))
+                        opens[key] += 1
+                    elif event.get("type") in ("REPLY", "REPLIED"):  # adjust to real type if needed
                         key = (email, str(event.get("emailCampaignId")))
                         replies[key] += 1
         else:
@@ -349,16 +355,19 @@ def aggregate_replies(contact_email_map, campaign_ids=None, start_timestamp_ms=N
                 start_timestamp_ms=start_timestamp_ms,
             )
             for event in events:
-                if event.get("type") in ("REPLY", "REPLIED"):
-                    campaign_id = event.get("emailCampaignId")
-                    if campaign_id is None:
-                        continue
-                    key = (email, str(campaign_id))
+                campaign_id = event.get("emailCampaignId")
+                if campaign_id is None:
+                    continue
+
+                key = (email, str(campaign_id))
+                if event.get("type") == "OPEN":
+                    opens[key] += 1
+                elif event.get("type") in ("REPLY", "REPLIED"):
                     replies[key] += 1
 
         time.sleep(0.05)
 
-    return replies
+    return opens, replies
 
 # TEMP: debug inside get_email_events_for_recipient, once, for one email
 print(events[:5])
@@ -393,15 +402,8 @@ def main():
     contact_email_map = get_contact_emails(filtered_ids)
     print(f"Resolved {len(contact_email_map)} contact emails")
 
-    print("Aggregating OPEN events...")
-    opens = aggregate_opens(
-        contact_email_map=contact_email_map,
-        campaign_ids=CAMPAIGN_IDS if CAMPAIGN_IDS else None,
-        start_timestamp_ms=START_TIMESTAMP_MS,
-    )
-
-    print("Aggregating REPLY events...")
-    replies = aggregate_replies(
+    print("Aggregating OPEN and REPLY events...")
+    opens, replies = aggregate_opens_and_replies(
         contact_email_map=contact_email_map,
         campaign_ids=CAMPAIGN_IDS if CAMPAIGN_IDS else None,
         start_timestamp_ms=START_TIMESTAMP_MS,
