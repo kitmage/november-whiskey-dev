@@ -302,6 +302,8 @@ def aggregate_opens_and_replies_for_campaign(contact_email_map, campaign_id, sta
 # ----------------------------
 # Main
 # ----------------------------
+
+"""
 def main():
     if HUBSPOT_TOKEN in (None, "", "$HUBSPOT_TOKEN"):
         raise RuntimeError("Set HUBSPOT_TOKEN in your environment before running.")
@@ -351,6 +353,57 @@ def main():
         reply_count = all_replies.get((recipient_email, email_campaign_id), 0)
         print(f"- {recipient_email} (campaign {email_campaign_id}): "
               f"opens={open_count}, replies={reply_count}")
+
+if __name__ == "__main__":
+    main()
+"""
+
+def main():
+    if HUBSPOT_TOKEN in (None, "", "$HUBSPOT_TOKEN"):
+        raise RuntimeError("Set HUBSPOT_TOKEN in your environment before running.")
+
+    print(f"Fetching members of list {LIST_ID}...")
+    contact_ids = get_all_list_member_ids(LIST_ID)
+    print(f"Found {len(contact_ids)} list members before suppression")
+
+    print(f"Filtering out contacts where {SUPPRESSION_PROPERTY} == 'true' and updating them...")
+    filtered_ids = filter_suppressed_contacts(contact_ids)
+    print(f"{len(filtered_ids)} contacts remain after suppression filter")
+
+    print("Fetching contact emails...")
+    contact_email_map = get_contact_emails(filtered_ids)
+    print(f"Resolved {len(contact_email_map)} contact emails")
+
+    # Normalize allowed emails
+    allowed_emails = {email.lower() for email in contact_email_map.values()}
+
+    campaign_id = "25347176"
+    print(f"\nDEBUG: Dumping all events for campaign {campaign_id} affecting our list contacts...\n")
+    events = get_email_events_for_campaign(
+        campaign_id=campaign_id,
+        start_timestamp_ms=START_TIMESTAMP_MS,
+    )
+
+    any_events = False
+    for e in events:
+        recipient = (e.get("recipient") or "").lower()
+        if recipient not in allowed_emails:
+            continue
+
+        any_events = True
+        # Pretty-print the core fields so we can see the *actual* type/value
+        print("RAW EVENT:", {
+            "recipient": recipient,
+            "type": e.get("type"),
+            "emailCampaignId": e.get("emailCampaignId"),
+            "created": e.get("created"),
+            "sentBy": e.get("sentBy"),
+            "appName": e.get("appName"),
+            "portalId": e.get("portalId"),
+        })
+
+    if not any_events:
+        print("No events returned for this campaign + these contacts.")
 
 if __name__ == "__main__":
     main()
