@@ -12,8 +12,9 @@ BASE_URL = "https://api.hubapi.com"
 # Config
 # ----------------------------
 LIST_ID = 677  # HubSpot segment/list ID
-# Optional: restrict to one or more marketing email campaign IDs
-CAMPAIGN_IDS = {"25347176"}  # e.g. {"123456789", "987654321"}
+
+# Restrict to one or more marketing email campaign IDs
+CAMPAIGN_IDS = {"25347176"}
 
 # Optional: only count events since a given Unix ms timestamp
 START_TIMESTAMP_MS = None  # e.g. 1741392000000
@@ -54,7 +55,7 @@ def batch_chunks(items, size):
 
 # ----------------------------
 # Get list memberships
-# Docs: GET /crm/v3/lists/{listId}/memberships
+# GET /crm/v3/lists/{listId}/memberships
 # ----------------------------
 def get_all_list_member_ids(list_id):
     """
@@ -190,7 +191,6 @@ def filter_suppressed_contacts(contact_ids):
 
 # ----------------------------
 # Batch read contacts to get email addresses
-# Uses CRM batch read for contacts
 # ----------------------------
 def get_contact_emails(contact_ids):
     """
@@ -229,13 +229,12 @@ def get_contact_emails(contact_ids):
     return result
 
 # ----------------------------
-# Pull marketing email events
-# Docs: GET /email/public/v1/events
-# Can query by recipient and/or campaignId
+# Pull marketing email events by campaign
+# GET /email/public/v1/events?campaignId=...
 # ----------------------------
-def get_email_events_for_recipient(recipient_email, campaign_id=None, start_timestamp_ms=None):
+def get_email_events_for_campaign(campaign_id, start_timestamp_ms=None):
     """
-    Pulls events for one recipient.
+    Pulls all events for a marketing email campaign.
     Returns raw event rows.
     """
     events = []
@@ -244,21 +243,13 @@ def get_email_events_for_recipient(recipient_email, campaign_id=None, start_time
 
     while has_more:
         params = {
-            "recipient": recipient_email,
+            "campaignId": campaign_id,
             "limit": 1000,
         }
 
-        if campaign_id:
-            params["campaignId"] = campaign_id
-
-        # The events endpoint supports paging via offset/hasMore in legacy style.
+        # Legacy paging style
         if offset:
             params["offset"] = offset
-
-        # If you want to reduce volume, use created__gt if your portal/docs support it.
-        # Leaving commented because availability can vary by implementation.
-        # if start_timestamp_ms:
-        #     params["startTimestamp"] = start_timestamp_ms
 
         url = f"{BASE_URL}/email/public/v1/events"
         data = get_json(url, params=params)
@@ -270,6 +261,7 @@ def get_email_events_for_recipient(recipient_email, campaign_id=None, start_time
         if not has_more:
             break
 
+    # Optional post-filter by timestamp
     if start_timestamp_ms is not None:
         events = [
             e for e in events
@@ -279,70 +271,57 @@ def get_email_events_for_recipient(recipient_email, campaign_id=None, start_time
     return events
 
 # ----------------------------
-# Aggregate opens and replies
+# Aggregate opens and replies from campaign events
 # ----------------------------
-def aggregate_opens_and_replies(contact_email_map, campaign_ids=None, start_timestamp_ms=None):
+def aggregate_opens_and_replies_for_campaign(contact_email_map, campaign_id, start_timestamp_ms=None):
     """
-    Returns two dicts:
+    For a single marketing email campaign:
+      - Pulls all events for the campaign
+      - Aggregates OPEN and REPLY events for contacts in contact_email_map
+
+    Returns:
       opens[(recipient_email, emailCampaignId)]   -> open_count
       replies[(recipient_email, emailCampaignId)] -> reply_count
     """
     opens = defaultdict(int)
     replies = defaultdict(int)
 
-    for _, email in contact_email_map.items():
-        if campaign_ids:
-            # Query per recipient + per campaign to reduce noise
-            for campaign_id in campaign_ids:
-                events = get_email_events_for_recipient(
-                    recipient_email=email,
-                    campaign_id=campaign_id,
-                    start_timestamp_ms=start_timestamp_ms,
-                )
-                for event in events:
-                    
-                    # DEBUG
-                    print(event.get("type"), event.get("emailCampaignId"))
-                    
-                    etype = event.get("type")
-                    if etype == "OPEN":
-                        key = (email, str(event.get("emailCampaignId")))
-                        opens[key] += 1
-                    elif etype in ("REPLY", "REPLIED"):  # adjust to real type if needed
-                        key = (email, str(event.get("emailCampaignId")))
-                        replies[key] += 1
-        else:
-            # Query all campaign events for this recipient
-            events = get_email_events_for_recipient(
-                recipient_email=email,
-                campaign_id=None,
-                start_timestamp_ms=start_timestamp_ms,
-            )
-            for event in events:
-                campaign_id = event.get("emailCampaignId")
-                if campaign_id is None:
-                    continue
+    # Allowed emails = list segment after suppression, normalized to lowercase
+    allowed_emails = {email.lower() for email in contact_email_map.values()}
 
-                key = (email, str(campaign_id))
-                etype = event.get("type")
-                if etype == "OPEN":
-                    opens[key] += 1
-                elif etype in ("REPLY", "REPLIED"):
-                    replies[key] += 1
+    events = get_email_events_for_campaign(
+        campaign_id=campaign_id,
+        start_timestamp_ms=start_timestamp_ms,
+    )
 
-        time.sleep(0.05)
+    for event in events:
+        recipient_email = (event.get("recipient") or "").lower()
+        if recipient_email not in allowed_emails:
+            # Ignore recipients not in your filtered list
+            continue
+
+        etype = event.get("type")
+        email_campaign_id = str(event.get("emailCampaignId"))
+
+        # DEBUG: see what's actually coming back
+        print("EVENT", etype, email_campaign_id, recipient_email)
+
+        key = (recipient_email, email_campaign_id)
+
+        if etype == "OPEN":
+            opens[key] += 1
+        elif etype in ("REPLY", "REPLIED"):
+            replies[key] += 1
 
     return opens, replies
 
-
 # ----------------------------
 # Optional: Resolve campaign metadata
-# Docs: GET /email/public/v1/campaigns/{campaign_id}
+# GET /email/public/v1/campaigns/{campaign_id}
 # ----------------------------
 def get_campaign_details(campaign_id):
     url = f"{BASE_URL}/email/public/v1/campaigns/{campaign_id}"
     return get_json(url)
-
 
 # ----------------------------
 # Main
@@ -366,28 +345,35 @@ def main():
     contact_email_map = get_contact_emails(filtered_ids)
     print(f"Resolved {len(contact_email_map)} contact emails")
 
-    print("Aggregating OPEN and REPLY events...")
-    opens, replies = aggregate_opens_and_replies(
-        contact_email_map=contact_email_map,
-        campaign_ids=CAMPAIGN_IDS if CAMPAIGN_IDS else None,
-        start_timestamp_ms=START_TIMESTAMP_MS,
-    )
+    # Aggregate per campaign
+    all_opens = defaultdict(int)
+    all_replies = defaultdict(int)
+
+    for campaign_id in CAMPAIGN_IDS:
+        print(f"Aggregating OPEN and REPLY events for campaign {campaign_id}...")
+        opens, replies = aggregate_opens_and_replies_for_campaign(
+            contact_email_map=contact_email_map,
+            campaign_id=campaign_id,
+            start_timestamp_ms=START_TIMESTAMP_MS,
+        )
+
+        # Merge into global dicts (in case you later add multiple campaigns)
+        for k, v in opens.items():
+            all_opens[k] += v
+        for k, v in replies.items():
+            all_replies[k] += v
+
+        # Courtesy pause between campaigns
+        time.sleep(0.1)
 
     # Union of all (email, campaign) keys that have either opens or replies
-    all_keys = set(opens.keys()) | set(replies.keys())
+    all_keys = set(all_opens.keys()) | set(all_replies.keys())
 
     print("\nrecipient_email,emailCampaignId,open_count,reply_count")
-    
-    emails = sorted(contact_email_map.values())
-    campaign_ids = sorted(CAMPAIGN_IDS or [])
-    
-    for email in emails:
-        for campaign_id in campaign_ids:
-            key = (email, str(campaign_id))
-            open_count = opens.get(key, 0)
-            reply_count = replies.get(key, 0)
-            print(f"{email},{campaign_id},{open_count},{reply_count}")
-
+    for recipient_email, email_campaign_id in sorted(all_keys):
+        open_count = all_opens.get((recipient_email, email_campaign_id), 0)
+        reply_count = all_replies.get((recipient_email, email_campaign_id), 0)
+        print(f"{recipient_email},{email_campaign_id},{open_count},{reply_count}")
 
 if __name__ == "__main__":
     main()
