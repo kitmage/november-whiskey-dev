@@ -320,6 +320,50 @@ def aggregate_opens(contact_email_map, campaign_ids=None, start_timestamp_ms=Non
     return opens
 
 # ----------------------------
+# Aggregate replies
+# ----------------------------
+def aggregate_replies(contact_email_map, campaign_ids=None, start_timestamp_ms=None):
+    """
+    Returns dict keyed by (recipient_email, emailCampaignId) -> reply_count
+    """
+    replies = defaultdict(int)
+
+    for _, email in contact_email_map.items():
+        if campaign_ids:
+            # Query per recipient + per campaign to reduce noise
+            for campaign_id in campaign_ids:
+                events = get_email_events_for_recipient(
+                    recipient_email=email,
+                    campaign_id=campaign_id,
+                    start_timestamp_ms=start_timestamp_ms,
+                )
+                for event in events:
+                    if event.get("type") in ("REPLY", "REPLIED"):  # adjust if your portal uses a different type string
+                        key = (email, str(event.get("emailCampaignId")))
+                        replies[key] += 1
+        else:
+            # Query all campaign events for this recipient
+            events = get_email_events_for_recipient(
+                recipient_email=email,
+                campaign_id=None,
+                start_timestamp_ms=start_timestamp_ms,
+            )
+            for event in events:
+                if event.get("type") in ("REPLY", "REPLIED"):
+                    campaign_id = event.get("emailCampaignId")
+                    if campaign_id is None:
+                        continue
+                    key = (email, str(campaign_id))
+                    replies[key] += 1
+
+        time.sleep(0.05)
+
+    return replies
+
+# TEMP: debug inside get_email_events_for_recipient, once, for one email
+print(events[:5])
+
+# ----------------------------
 # Optional: Resolve campaign metadata
 # Docs: GET /email/public/v1/campaigns/{campaign_id}
 # ----------------------------
@@ -356,9 +400,21 @@ def main():
         start_timestamp_ms=START_TIMESTAMP_MS,
     )
 
-    print("\nrecipient_email,emailCampaignId,open_count")
-    for (recipient_email, email_campaign_id), count in sorted(opens.items()):
-        print(f"{recipient_email},{email_campaign_id},{count}")
+    print("Aggregating REPLY events...")
+    replies = aggregate_replies(
+        contact_email_map=contact_email_map,
+        campaign_ids=CAMPAIGN_IDS if CAMPAIGN_IDS else None,
+        start_timestamp_ms=START_TIMESTAMP_MS,
+    )
+
+    # Union of all (email, campaign) keys that have either opens or replies
+    all_keys = set(opens.keys()) | set(replies.keys())
+
+    print("\nrecipient_email,emailCampaignId,open_count,reply_count")
+    for recipient_email, email_campaign_id in sorted(all_keys):
+        open_count = opens.get((recipient_email, email_campaign_id), 0)
+        reply_count = replies.get((recipient_email, email_campaign_id), 0)
+        print(f"{recipient_email},{email_campaign_id},{open_count},{reply_count}")
 
 if __name__ == "__main__":
     main()
