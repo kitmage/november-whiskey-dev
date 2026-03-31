@@ -106,12 +106,77 @@ def get_email_campaign_ids_for_email(email_id):
             pass
 
     return sorted(email_campaign_ids)
+
+def get_email_campaign_context_for_email(email_id):
+    """
+    Uses Marketing Emails v3: GET /marketing/v3/emails/{emailId}
+    Returns:
+      {
+        "appId": int or None,
+        "emailCampaignIds": [int, ...]
+      }
+    """
+    data = hs_get(f"/marketing/v3/emails/{email_id}")
+
+    email_campaign_ids = set()
+
+    # allEmailCampaignIds is an array of strings
+    for cid in data.get("allEmailCampaignIds", []):
+        try:
+            email_campaign_ids.add(int(cid))
+        except (TypeError, ValueError):
+            pass
+
+    # primaryEmailCampaignId is a single string
+    primary = data.get("primaryEmailCampaignId")
+    if primary:
+        try:
+            email_campaign_ids.add(int(primary))
+        except (TypeError, ValueError):
+            pass
+
+    # appId: best-effort extraction
+    app_id = None
+
+    # In many accounts, appId appears under stats metadata or event metadata.
+    # Try a few likely locations defensively:
+    stats = data.get("stats") or {}
+    if isinstance(stats, dict):
+        # sometimes appId is flattened
+        if "appId" in stats:
+            try:
+                app_id = int(stats["appId"])
+            except (TypeError, ValueError):
+                pass
+
+        # sometimes nested inside qualifierStats or similar structures
+        if app_id is None:
+            for section in ("qualifierStats", "counters"):
+                sec = stats.get(section)
+                if isinstance(sec, dict) and "appId" in sec:
+                    try:
+                        app_id = int(sec["appId"])
+                        break
+                    except (TypeError, ValueError):
+                        pass
+
+    # As a fallback, check top-level if HubSpot starts surfacing it there
+    if app_id is None and "appId" in data:
+        try:
+            app_id = int(data["appId"])
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        "appId": app_id,
+        "emailCampaignIds": sorted(email_campaign_ids),
+    }
     
 
-def get_open_events_for_email_campaign(email_campaign_id):
+def get_open_events_for_email_campaign(app_id, email_campaign_id):
     """
     Uses Email Events API v1:
-      GET /email/public/v1/events?emailCampaignId={id}&type=OPEN
+      GET /email/public/v1/events?appId={appId}&emailCampaignId={id}&type=OPEN
     Paginates using 'offset' (string cursor) until hasMore is false.
     Returns list of event dicts.
     """
@@ -120,17 +185,16 @@ def get_open_events_for_email_campaign(email_campaign_id):
 
     while True:
         params = {
+            "appId": app_id,
             "emailCampaignId": email_campaign_id,
-            "type": "OPEN",     # <-- filter for OPEN events
-            "limit": 1000,      # max per page
+            "type": "OPEN",
+            "limit": 1000,
         }
-        # offset is a string cursor returned by the API, only include if present
         if offset is not None:
             params["offset"] = offset
 
         data = hs_get("/email/public/v1/events", params=params)
 
-        # Per docs, events are under "events"
         batch = data.get("events", [])
         events.extend(batch)
 
@@ -138,7 +202,6 @@ def get_open_events_for_email_campaign(email_campaign_id):
         if not has_more:
             break
 
-        # offset is a string (cursor), not necessarily numeric
         offset = data.get("offset")
         if not offset:
             break
@@ -158,29 +221,32 @@ def main():
 
     for email_id in email_ids:
         print(f"\n=== Email ID {email_id} ===")
-        email_campaign_ids = get_email_campaign_ids_for_email(email_id)
+        ctx = get_email_campaign_context_for_email(email_id)
+        app_id = ctx["appId"]
+        email_campaign_ids = ctx["emailCampaignIds"]
+
+        if app_id is None:
+            print("  No appId found for this email; cannot query raw events.", file=sys.stderr)
+            continue
 
         if not email_campaign_ids:
-            print("  No legacy emailCampaignIds found for this email.")
+            print("  No legacy emailCampaignIds found for this email.", file=sys.stderr)
             continue
 
         for ecid in email_campaign_ids:
-            print(f"  -- emailCampaignId {ecid} --", file=sys.stderr)
-            open_events = get_open_events_for_email_campaign(ecid)
+            print(f"  -- appId {app_id}, emailCampaignId {ecid} --", file=sys.stderr)
+            open_events = get_open_events_for_email_campaign(app_id, ecid)
 
             if not open_events:
                 print(f"  (no OPEN events for emailCampaignId {ecid})")
                 continue
 
-            # Print raw events, one per line, tagged with emailId and emailCampaignId
             for ev in open_events:
-                # ev typically includes: type, recipient, created, emailCampaignId, etc.
                 recipient = ev.get("recipient")
                 created = ev.get("created")
                 event_type = ev.get("type")
-                # Print a concise line; you can dump full JSON if you prefer.
                 print(
-                    f"emailId={email_id}, emailCampaignId={ecid}, "
+                    f"emailId={email_id}, appId={app_id}, emailCampaignId={ecid}, "
                     f"type={event_type}, recipient={recipient}, created={created}, raw={ev}"
                 )
 
