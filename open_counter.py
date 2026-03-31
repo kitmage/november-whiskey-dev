@@ -106,36 +106,40 @@ def get_email_campaign_ids_for_email(email_id):
             pass
 
     return sorted(email_campaign_ids)
-
+    
 
 def get_open_events_for_email_campaign(email_campaign_id):
     """
     Uses Email Events API v1:
-      GET /email/public/v1/events?emailCampaignId={id}&eventType=OPEN
-    Paginates using 'offset' until hasMore is false.
+      GET /email/public/v1/events?emailCampaignId={id}&type=OPEN
+    Paginates using 'offset' (string cursor) until hasMore is false.
     Returns list of event dicts.
     """
     events = []
-    offset = 0
+    offset = None
 
     while True:
         params = {
             "emailCampaignId": email_campaign_id,
-            "eventType": "OPEN",
-            "limit": 1000,  # max allowed per page
-            "offset": offset,
+            "type": "OPEN",     # <-- filter for OPEN events
+            "limit": 1000,      # max per page
         }
+        # offset is a string cursor returned by the API, only include if present
+        if offset is not None:
+            params["offset"] = offset
+
         data = hs_get("/email/public/v1/events", params=params)
 
-        batch = data.get("events", []) or data.get("results", []) or data.get("events", [])
-        # Official docs use "events", but we defensively check multiple keys
+        # Per docs, events are under "events"
+        batch = data.get("events", [])
         events.extend(batch)
 
         has_more = data.get("hasMore", False)
         if not has_more:
             break
 
-        offset = data.get("offset", 0)
+        # offset is a string (cursor), not necessarily numeric
+        offset = data.get("offset")
         if not offset:
             break
 
