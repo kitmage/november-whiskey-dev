@@ -1,10 +1,16 @@
 import os
 import sys
+import time
+from datetime import datetime, timedelta
 import requests
 
 HUBSPOT_TOKEN = os.environ.get("HUBSPOT_TOKEN")
+
 LIST_ID = 677  # HubSpot segment/list ID
 PROPERTY_NAME = "do_not_send_pci"
+
+# New: Campaign IDs
+CAMPAIGN_IDS = {"25347176"}
 
 BASE_URL = "https://api.hubapi.com"
 
@@ -38,7 +44,7 @@ def get_list_contacts(list_id, properties=None):
             break
 
         for item in results:
-            # Your sample shows: {"membershipTimestamp": "...", "recordId": "4585..."}
+            # Your structure: {"membershipTimestamp": "...", "recordId": "4585..."}
             contact_id = item.get("recordId")
             if not contact_id:
                 raise RuntimeError(f"Could not locate contact id in membership item: {item}")
@@ -72,8 +78,61 @@ def get_list_contacts(list_id, properties=None):
     return contacts
 
 
+def get_reply_emails_for_campaigns(campaign_ids, days_back=30):
+    """
+    For each campaign ID, fetch REPLY events from the past `days_back` days
+    and return a set of all unique recipient email addresses that replied.
+    Uses legacy Email Events API: /email/public/v1/events
+    """
+    replied_emails = set()
+
+    end_dt = datetime.utcnow()
+    start_dt = end_dt - timedelta(days=days_back)
+
+    # Email Events API expects ms since epoch (UTC)
+    start_ts = int(start_dt.timestamp() * 1000)
+    end_ts = int(end_dt.timestamp() * 1000)
+
+    for campaign_id in campaign_ids:
+        offset = 0
+        has_more = True
+
+        while has_more:
+            params = {
+                "campaignId": campaign_id,
+                "eventType": "REPLY",
+                "startTimestamp": start_ts,
+                "endTimestamp": end_ts,
+                "limit": 1000,
+                "offset": offset,
+            }
+
+            resp = requests.get(
+                f"{BASE_URL}/email/public/v1/events",
+                headers=headers,
+                params=params,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            events = data.get("events", [])
+            for ev in events:
+                # Typical fields: recipient, email, etc. We'll use `recipient`
+                email = ev.get("recipient") or ev.get("email")
+                if email:
+                    replied_emails.add(email.lower())
+
+            has_more = data.get("hasMore", False)
+            offset = data.get("offset", 0)
+
+            # Simple safety to avoid hammering
+            time.sleep(0.1)
+
+    return replied_emails
+
+
 def main():
-    # Get all contacts in the list with the do_not_send_pci property
+    # 1) Get all contacts in the list with do_not_send_pci + email
     contacts = get_list_contacts(LIST_ID, properties=[PROPERTY_NAME, "email"])
 
     PCI_ELIGIBLE = []
@@ -83,7 +142,6 @@ def main():
         props = contact.get("properties", {}) or {}
         do_not_send_pci_val = props.get(PROPERTY_NAME)
 
-        # HubSpot booleans often come as 'true'/'false' strings
         is_ineligible = str(do_not_send_pci_val).lower() == "true"
 
         if is_ineligible:
@@ -91,7 +149,23 @@ def main():
         else:
             PCI_ELIGIBLE.append(contact)
 
-    # Print the two lists (id + email)
+    # 2) Build set of emails that replied to specified campaigns in past 30 days
+    replied_emails = get_reply_emails_for_campaigns(CAMPAIGN_IDS, days_back=30)
+
+    # 3) Second pass: move eligible contacts with replies into ineligible
+    NEW_ELIGIBLE = []
+    for contact in PCI_ELIGIBLE:
+        props = contact.get("properties", {}) or {}
+        email = (props.get("email") or "").lower()
+
+        if email and email in replied_emails:
+            PCI_INELIGIBLE.append(contact)
+        else:
+            NEW_ELIGIBLE.append(contact)
+
+    PCI_ELIGIBLE = NEW_ELIGIBLE
+
+    # 4) Print the two lists (id + email)
     print("=== PCI_ELIGIBLE ===")
     for c in PCI_ELIGIBLE:
         cid = c.get("id")
