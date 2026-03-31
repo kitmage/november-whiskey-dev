@@ -1,6 +1,7 @@
 import os
 import sys
 import requests
+import json
 
 HUBSPOT_TOKEN = os.environ.get("HUBSPOT_TOKEN")
 LIST_ID = 677  # HubSpot segment/list ID (not used in this script, but kept from your template)
@@ -221,6 +222,11 @@ def main():
 
     for email_id in email_ids:
         print(f"\n=== Email ID {email_id} ===")
+
+        data = hs_get(f"/marketing/v3/emails/{email_id}")
+        print(json.dumps(data, indent=2))
+        sys.exit(0)
+        
         ctx = get_email_campaign_context_for_email(email_id)
         app_id = ctx["appId"]
         email_campaign_ids = ctx["emailCampaignIds"]
@@ -249,12 +255,6 @@ def main():
                     f"emailId={email_id}, appId={app_id}, emailCampaignId={ecid}, "
                     f"type={event_type}, recipient={recipient}, created={created}, raw={ev}"
                 )
-
-import json
-
-data = hs_get(f"/marketing/v3/emails/{email_id}")
-print(json.dumps(data, indent=2))
-sys.exit(0)
 
 
 if __name__ == "__main__":
