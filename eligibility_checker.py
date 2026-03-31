@@ -1,14 +1,14 @@
 import os
 import sys
-import time
-from datetime import datetime, timedelta, timezone
 import requests
+from datetime import datetime, timedelta, timezone
 
 HUBSPOT_TOKEN = os.environ.get("HUBSPOT_TOKEN")
 
 LIST_ID = 677  # HubSpot segment/list ID
 PROPERTY_NAME = "do_not_send_pci"
 
+# Campaigns to consider for replies
 CAMPAIGN_IDS = {"25347176"}
 
 BASE_URL = "https://api.hubapi.com"
@@ -20,6 +20,10 @@ headers = {
 
 
 def get_list_contacts(list_id, properties=None):
+    """
+    Returns a list of contact records (dicts) from a list/segment.
+    Uses v3 CRM Lists API + Batch read for properties.
+    """
     endpoint = f"{BASE_URL}/crm/v3/lists/{list_id}/memberships"
     after = None
     contact_ids = []
@@ -38,6 +42,7 @@ def get_list_contacts(list_id, properties=None):
             break
 
         for item in results:
+            # Your structure: {"membershipTimestamp": "...", "recordId": "4585..."}
             contact_id = item.get("recordId")
             if not contact_id:
                 raise RuntimeError(f"Could not locate contact id in membership item: {item}")
@@ -70,68 +75,43 @@ def get_list_contacts(list_id, properties=None):
     return contacts
 
 
-def get_reply_emails_for_campaigns(campaign_ids, days_back=30):
+# ---------------------------------------------------------
+# Library hook: map contacts to "has replies" based on campaigns
+# ---------------------------------------------------------
+
+def get_reply_flags_for_contacts(contact_emails, campaign_ids, days_back=30):
     """
-    Approximate "replies" for the past `days_back` days by:
-      - Pulling all email events for given campaignIds in time range
-      - Filtering in code for events that look like replies (e.g. type 'INBOUND_EMAIL' / 'REPLY')
+    Library stub: For each email in contact_emails, return a boolean flag
+    indicating whether that contact has > 0 replies to any of the given
+    campaign_ids in the last `days_back` days.
+
+    Return format:
+        { "email1@example.com": True, "email2@example.com": False, ... }
+
+    IMPLEMENTATION NEEDED:
+      - You can fill this in using:
+          * a data export from HubSpot
+          * a separate integration you trust
+          * or, once HubSpot support provides a working events/analytics endpoint
+            for replies in your portal, call it here.
+
+    For now, this stub returns an empty dict (no one has replies).
     """
-    replied_emails = set()
-
-    # Proper timezone-aware UTC datetimes
-    end_dt = datetime.now(timezone.utc)
-    start_dt = end_dt - timedelta(days=days_back)
-
-    start_ts = int(start_dt.timestamp() * 1000)
-    end_ts = int(end_dt.timestamp() * 1000)
-
-    for campaign_id in campaign_ids:
-        offset = 0
-        has_more = True
-
-        while has_more:
-            params = {
-                "campaignId": campaign_id,
-                "startTimestamp": start_ts,
-                "endTimestamp": end_ts,
-                "limit": 1000,
-                "offset": offset,
-            }
-
-            resp = requests.get(
-                f"{BASE_URL}/email/public/v1/events",
-                headers=headers,
-                params=params,
-            )
-            if resp.status_code >= 400:
-                print(
-                    f"Error fetching events for campaign {campaign_id}: "
-                    f"{resp.status_code} {resp.text}",
-                    file=sys.stderr,
-                )
-                break
-
-            data = resp.json()
-            events = data.get("events", [])
-
-            for ev in events:
-                # Typical event shape includes 'type' / 'eventType' and 'recipient'
-                ev_type = (ev.get("type") or ev.get("eventType") or "").upper()
-                email = ev.get("recipient") or ev.get("email")
-
-                # Heuristic: treat inbound / reply‑like events as replies
-                if ev_type in {"INBOUND_EMAIL", "REPLY", "REPLY_TO"} and email:
-                    replied_emails.add(email.lower())
-
-            has_more = data.get("hasMore", False)
-            offset = data.get("offset", 0)
-
-            time.sleep(0.1)
-
-    return replied_emails
+    # Example of how you might implement once you have a working endpoint:
+    #
+    # end_dt = datetime.now(timezone.utc)
+    # start_dt = end_dt - timedelta(days=days_back)
+    # start_ts = int(start_dt.timestamp() * 1000)
+    # end_ts = int(end_dt.timestamp() * 1000)
+    #
+    # ... call your endpoint, fill reply_flags ...
+    #
+    reply_flags = {email.lower(): False for email in contact_emails if email}
+    return reply_flags
 
 
 def main():
+    # 1) Get all contacts in the list with do_not_send_pci + email
     contacts = get_list_contacts(LIST_ID, properties=[PROPERTY_NAME, "email"])
 
     PCI_ELIGIBLE = []
@@ -148,20 +128,36 @@ def main():
         else:
             PCI_ELIGIBLE.append(contact)
 
-    replied_emails = get_reply_emails_for_campaigns(CAMPAIGN_IDS, days_back=30)
+    # 2) Build email list for eligible contacts
+    eligible_emails = []
+    for c in PCI_ELIGIBLE:
+        email = (c.get("properties", {}) or {}).get("email")
+        if email:
+            eligible_emails.append(email.lower())
 
+    # 3) Get reply flags per email for the given campaigns
+    reply_flags = get_reply_flags_for_contacts(
+        contact_emails=eligible_emails,
+        campaign_ids=CAMPAIGN_IDS,
+        days_back=30,
+    )
+
+    # 4) Second pass: move eligible contacts with replies into ineligible
     NEW_ELIGIBLE = []
     for contact in PCI_ELIGIBLE:
         props = contact.get("properties", {}) or {}
         email = (props.get("email") or "").lower()
 
-        if email and email in replied_emails:
+        has_replied = reply_flags.get(email, False)
+
+        if has_replied:
             PCI_INELIGIBLE.append(contact)
         else:
             NEW_ELIGIBLE.append(contact)
 
     PCI_ELIGIBLE = NEW_ELIGIBLE
 
+    # 5) Print the two lists (id + email)
     print("=== PCI_ELIGIBLE ===")
     for c in PCI_ELIGIBLE:
         cid = c.get("id")
