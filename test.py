@@ -377,10 +377,16 @@ def main():
     all_keys = set(opens.keys()) | set(replies.keys())
 
     print("\nrecipient_email,emailCampaignId,open_count,reply_count")
-    for recipient_email, email_campaign_id in sorted(all_keys):
-        open_count = opens.get((recipient_email, email_campaign_id), 0)
-        reply_count = replies.get((recipient_email, email_campaign_id), 0)
-        print(f"{recipient_email},{email_campaign_id},{open_count},{reply_count}")
+    
+    emails = sorted(contact_email_map.values())
+    campaign_ids = sorted(CAMPAIGN_IDS or [])
+    
+    for email in emails:
+        for campaign_id in campaign_ids:
+            key = (email, str(campaign_id))
+            open_count = opens.get(key, 0)
+            reply_count = replies.get(key, 0)
+            print(f"{email},{campaign_id},{open_count},{reply_count}")
 
 
 if __name__ == "__main__":
