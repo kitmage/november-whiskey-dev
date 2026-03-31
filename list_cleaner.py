@@ -1,4 +1,6 @@
 import os
+import sys
+import json
 import requests
 
 HUBSPOT_TOKEN = os.environ.get("HUBSPOT_TOKEN")
@@ -33,8 +35,28 @@ def get_list_contacts(list_id, properties=None):
         data = resp.json()
 
         results = data.get("results", [])
+        if not results:
+            break
+
         for item in results:
-            contact_ids.append(item["id"])
+            # Try several likely locations for the contact ID
+            contact_id = None
+
+            # Most likely: nested under "contact"
+            if isinstance(item, dict):
+                if "contact" in item and isinstance(item["contact"], dict):
+                    contact_id = item["contact"].get("id")
+                # Fallbacks if structure differs
+                if contact_id is None:
+                    contact_id = item.get("id")  # in case it's flat
+
+            if contact_id is None:
+                # Dump one problematic item and exit so we can see structure
+                print("Unexpected membership item structure, cannot find contact id:")
+                print(json.dumps(item, indent=2))
+                raise RuntimeError("Could not locate contact id in membership item")
+
+            contact_ids.append(str(contact_id))
 
         paging = data.get("paging", {})
         next_link = paging.get("next", {})
@@ -48,7 +70,6 @@ def get_list_contacts(list_id, properties=None):
     # 2) Batch read contacts to get properties
     contacts = []
     batch_endpoint = f"{BASE_URL}/crm/v3/objects/contacts/batch/read"
-    # HubSpot batch read limit is 100 per call
     batch_size = 100
 
     for i in range(0, len(contact_ids), batch_size):
@@ -67,7 +88,7 @@ def get_list_contacts(list_id, properties=None):
 
 def main():
     # Get all contacts in the list with the do_not_send_pci property
-    contacts = get_list_contacts(LIST_ID, properties=[PROPERTY_NAME])
+    contacts = get_list_contacts(LIST_ID, properties=[PROPERTY_NAME, "email"])
 
     PCI_ELIGIBLE = []
     PCI_INELIGIBLE = []
@@ -84,7 +105,7 @@ def main():
         else:
             PCI_ELIGIBLE.append(contact)
 
-    # Print the two lists (just showing id + email for readability)
+    # Print the two lists (id + email)
     print("=== PCI_ELIGIBLE ===")
     for c in PCI_ELIGIBLE:
         cid = c.get("id")
@@ -100,5 +121,6 @@ def main():
 
 if __name__ == "__main__":
     if not HUBSPOT_TOKEN:
-        raise SystemExit("HUBSPOT_TOKEN environment variable is not set.")
+        print("HUBSPOT_TOKEN environment variable is not set.", file=sys.stderr)
+        sys.exit(1)
     main()
