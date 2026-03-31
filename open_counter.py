@@ -250,6 +250,12 @@ def main():
                     f"type={event_type}, recipient={recipient}, created={created}, raw={ev}"
                 )
 
+import json
+
+data = hs_get(f"/marketing/v3/emails/{email_id}")
+print(json.dumps(data, indent=2))
+sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
