@@ -1,6 +1,9 @@
 import os
 import sys
 import json
+import time
+from datetime import datetime, timedelta, timezone
+
 import requests
 
 # ---- ENV / CONSTANTS --------------------------------------------------------
@@ -13,6 +16,14 @@ PROPERTY_NAME = "do_not_send_pci"
 
 CAMPAIGN_ID = "6afccccd-1f8b-4036-ba17-3eea85f23a05"
 BASE_URL = "https://api.hubapi.com"
+
+# Lookback window in hours (e.g. 12 = last 12 hours)
+LOOKBACK_WINDOW_HOURS = 12
+
+# Compute "now minus LOOKBACK_WINDOW_HOURS" in Unix milliseconds (UTC)
+NOW_UTC = datetime.now(timezone.utc)
+LOOKBACK_DT = NOW_UTC - timedelta(hours=LOOKBACK_WINDOW_HOURS)
+LOOKBACK_TS = int(LOOKBACK_DT.timestamp() * 1000)
 
 HEADERS = {
     "Authorization": f"Bearer {HUBSPOT_TOKEN}",
@@ -163,10 +174,16 @@ def get_open_counts_for_campaign(campaign_id):
     """
     Returns:
       dict[(emailId:str, emailCampaignId:int, recipient:str)] = open_count:int
+    Only counts events with created >= LOOKBACK_TS.
     """
     print(
         f"Fetching marketing emails for campaign {campaign_id} "
         f"(appId={HUBSPOT_APP_ID})...",
+        file=sys.stderr,
+    )
+    print(
+        f"Using lookback window: last {LOOKBACK_WINDOW_HOURS} hours "
+        f"(events created >= {LOOKBACK_TS})",
         file=sys.stderr,
     )
 
@@ -199,9 +216,15 @@ def get_open_counts_for_campaign(campaign_id):
                 continue
 
             for ev in open_events:
+                created = ev.get("created")
+                # Skip if created is missing or older than lookback
+                if not isinstance(created, (int, float)) or created < LOOKBACK_TS:
+                    continue
+
                 recipient = (ev.get("recipient") or "").strip().lower()
                 if not recipient:
                     continue
+
                 key = (str(email_id), int(ecid), recipient)
                 open_counts[key] = open_counts.get(key, 0) + 1
 
@@ -288,33 +311,34 @@ def get_contacts_by_pci_flag(list_id, property_name):
 def main():
     require_env()
 
-    # 1) Get open counts for this campaign
+    # 1) Get open counts for this campaign (filtered by LOOKBACK_TS)
     open_counts = get_open_counts_for_campaign(CAMPAIGN_ID)
 
     # 2) Get contacts in the list with PCI flag + email
     pci_eligible, pci_ineligible = get_contacts_by_pci_flag(LIST_ID, PROPERTY_NAME)
 
-    # Build a quick lookup: email (lowercased) -> contact info
-    contacts_by_email = {}
-    for c in pci_eligible + pci_ineligible:
+    # Build a lookup: email (lowercased) -> eligible contact info
+    # ONLY PCI-ELIGIBLE contacts here
+    eligible_by_email = {}
+    for c in pci_eligible:
         props = c.get("properties", {}) or {}
         email = (props.get("email") or "").strip().lower()
         if not email:
             continue
-        contacts_by_email[email] = {
+        eligible_by_email[email] = {
             "id": c.get("id"),
             "email": email,
-            "do_not_send_pci": str(props.get(PROPERTY_NAME)).lower() == "true",
+            "do_not_send_pci": False,  # by definition of pci_eligible
         }
 
-    # 3) Cross-reference: only include opens where recipient is in the list
-    # Final output: one line per (contact, emailId, emailCampaignId) with openCount
-    print("contactId,email,emailId,emailCampaignId,openCount,do_not_send_pci")
+    # 3) Cross-reference: only include opens where recipient is in PCI-ELIGIBLE list
+    # Final output: one line per (eligible contact, emailId, emailCampaignId) with openCount
+    print("contactId,email,emailId,emailCampaignId,openCount")
 
     for (email_id, ecid, recipient), count in sorted(open_counts.items()):
-        contact = contacts_by_email.get(recipient)
+        contact = eligible_by_email.get(recipient)
         if not contact:
-            # recipient not in the specified list; skip
+            # recipient not in the PCI_ELIGIBLE portion of the list; skip
             continue
 
         print(
@@ -322,22 +346,8 @@ def main():
             f"{contact['email']},"
             f"{email_id},"
             f"{ecid},"
-            f"{count},"
-            f"{str(contact['do_not_send_pci']).lower()}"
+            f"{count}"
         )
-
-    # Optional: if you still want to see aggregate PCI_ELIGIBLE vs INELIGIBLE:
-    # print("\n=== PCI_ELIGIBLE (in list, regardless of opens) ===", file=sys.stderr)
-    # for c in pci_eligible:
-    #     cid = c.get("id")
-    #     email = c.get("properties", {}).get("email")
-    #     print(f"id={cid}, email={email}", file=sys.stderr)
-    #
-    # print("\n=== PCI_INELIGIBLE (in list, regardless of opens) ===", file=sys.stderr)
-    # for c in pci_ineligible:
-    #     cid = c.get("id")
-    #     email = c.get("properties", {}).get("email")
-    #     print(f"id={cid}, email={email}", file=sys.stderr)
 
 
 if __name__ == "__main__":
