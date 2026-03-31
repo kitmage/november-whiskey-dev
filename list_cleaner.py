@@ -1,6 +1,5 @@
 import os
 import sys
-import json
 import requests
 
 HUBSPOT_TOKEN = os.environ.get("HUBSPOT_TOKEN")
@@ -39,23 +38,10 @@ def get_list_contacts(list_id, properties=None):
             break
 
         for item in results:
-            # Try several likely locations for the contact ID
-            contact_id = None
-
-            # Most likely: nested under "contact"
-            if isinstance(item, dict):
-                if "contact" in item and isinstance(item["contact"], dict):
-                    contact_id = item["contact"].get("id")
-                # Fallbacks if structure differs
-                if contact_id is None:
-                    contact_id = item.get("id")  # in case it's flat
-
-            if contact_id is None:
-                # Dump one problematic item and exit so we can see structure
-                print("Unexpected membership item structure, cannot find contact id:")
-                print(json.dumps(item, indent=2))
-                raise RuntimeError("Could not locate contact id in membership item")
-
+            # Your sample shows: {"membershipTimestamp": "...", "recordId": "4585..."}
+            contact_id = item.get("recordId")
+            if not contact_id:
+                raise RuntimeError(f"Could not locate contact id in membership item: {item}")
             contact_ids.append(str(contact_id))
 
         paging = data.get("paging", {})
