@@ -55,7 +55,6 @@ def batch_chunks(items, size):
 
 # ----------------------------
 # Get list memberships
-# GET /crm/v3/lists/{listId}/memberships
 # ----------------------------
 def get_all_list_member_ids(list_id):
     """
@@ -105,20 +104,16 @@ def create_suppression_note_for_contact(contact_id):
     Create a note on the contact explaining why they were removed.
     Owner is set from NOTE_OWNER_ID (HUBSPOT_USER_ID env) if available.
     """
-    # 1) Create the note object
     url = f"{BASE_URL}/crm/v3/objects/notes"
 
     properties = {
         "hs_note_body": SUPPRESSION_NOTE_BODY,
-        # hs_timestamp is required in your portal
         "hs_timestamp": int(time.time() * 1000),
     }
     if NOTE_OWNER_ID:
         properties["hubspot_owner_id"] = NOTE_OWNER_ID
 
-    payload = {
-        "properties": properties
-    }
+    payload = {"properties": properties}
 
     resp = requests.post(url, headers=headers(), json=payload, timeout=30)
     if resp.status_code >= 400:
@@ -129,7 +124,6 @@ def create_suppression_note_for_contact(contact_id):
     note_id = note.get("id")
 
     if note_id:
-        # 2) Associate note to contact
         associate_note_to_contact(note_id, contact_id)
 
     return note
@@ -163,7 +157,6 @@ def filter_suppressed_contacts(contact_ids):
         resp.raise_for_status()
         data = resp.json()
 
-        # Build a map from this chunk by ID -> suppression value
         suppression_map = {}
         for row in data.get("results", []):
             cid = str(row.get("id"))
@@ -173,16 +166,13 @@ def filter_suppressed_contacts(contact_ids):
         for cid in chunk:
             val = suppression_map.get(str(cid))
             if str(val).lower() == "true":
-                # Suppressed: create a note
                 try:
                     print(f"[SUPPRESS] Contact {cid}: creating note (owner={NOTE_OWNER_ID})...")
                     create_suppression_note_for_contact(cid)
                 except Exception as e:
                     print(f"[WARN] Failed to create note for contact {cid}: {e}")
-                # Do NOT add to allowed list
-                continue
+                continue  # skip suppressed
 
-            # Not suppressed, keep
             allowed_ids.append(str(cid))
 
         time.sleep(0.05)
@@ -223,14 +213,12 @@ def get_contact_emails(contact_ids):
             if email:
                 result[cid] = email.lower().strip()
 
-        # small courtesy pause
         time.sleep(0.05)
 
     return result
 
 # ----------------------------
 # Pull marketing email events by campaign
-# GET /email/public/v1/events?campaignId=...
 # ----------------------------
 def get_email_events_for_campaign(campaign_id, start_timestamp_ms=None):
     """
@@ -247,7 +235,6 @@ def get_email_events_for_campaign(campaign_id, start_timestamp_ms=None):
             "limit": 1000,
         }
 
-        # Legacy paging style
         if offset:
             params["offset"] = offset
 
@@ -261,7 +248,6 @@ def get_email_events_for_campaign(campaign_id, start_timestamp_ms=None):
         if not has_more:
             break
 
-    # Optional post-filter by timestamp
     if start_timestamp_ms is not None:
         events = [
             e for e in events
@@ -286,7 +272,6 @@ def aggregate_opens_and_replies_for_campaign(contact_email_map, campaign_id, sta
     opens = defaultdict(int)
     replies = defaultdict(int)
 
-    # Allowed emails = list segment after suppression, normalized to lowercase
     allowed_emails = {email.lower() for email in contact_email_map.values()}
 
     events = get_email_events_for_campaign(
@@ -297,13 +282,12 @@ def aggregate_opens_and_replies_for_campaign(contact_email_map, campaign_id, sta
     for event in events:
         recipient_email = (event.get("recipient") or "").lower()
         if recipient_email not in allowed_emails:
-            # Ignore recipients not in your filtered list
             continue
 
         etype = event.get("type")
         email_campaign_id = str(event.get("emailCampaignId"))
 
-        # DEBUG: see what's actually coming back
+        # DEBUG: mirror what's happening for each event
         print("EVENT", etype, email_campaign_id, recipient_email)
 
         key = (recipient_email, email_campaign_id)
@@ -314,14 +298,6 @@ def aggregate_opens_and_replies_for_campaign(contact_email_map, campaign_id, sta
             replies[key] += 1
 
     return opens, replies
-
-# ----------------------------
-# Optional: Resolve campaign metadata
-# GET /email/public/v1/campaigns/{campaign_id}
-# ----------------------------
-def get_campaign_details(campaign_id):
-    url = f"{BASE_URL}/email/public/v1/campaigns/{campaign_id}"
-    return get_json(url)
 
 # ----------------------------
 # Main
@@ -357,23 +333,24 @@ def main():
             start_timestamp_ms=START_TIMESTAMP_MS,
         )
 
-        # Merge into global dicts (in case you later add multiple campaigns)
         for k, v in opens.items():
             all_opens[k] += v
         for k, v in replies.items():
             all_replies[k] += v
 
-        # Courtesy pause between campaigns
         time.sleep(0.1)
 
-    # Union of all (email, campaign) keys that have either opens or replies
-    all_keys = set(all_opens.keys()) | set(all_replies.keys())
+    # Print a human-readable summary to the CLI
+    print("\n=== Per-contact engagement ===")
+    if not (all_opens or all_replies):
+        print("No OPEN or REPLY events found for the configured campaigns and list.")
+        return
 
-    print("\nrecipient_email,emailCampaignId,open_count,reply_count")
-    for recipient_email, email_campaign_id in sorted(all_keys):
+    for (recipient_email, email_campaign_id) in sorted(set(all_opens) | set(all_replies)):
         open_count = all_opens.get((recipient_email, email_campaign_id), 0)
         reply_count = all_replies.get((recipient_email, email_campaign_id), 0)
-        print(f"{recipient_email},{email_campaign_id},{open_count},{reply_count}")
+        print(f"- {recipient_email} (campaign {email_campaign_id}): "
+              f"opens={open_count}, replies={reply_count}")
 
 if __name__ == "__main__":
     main()
