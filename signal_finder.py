@@ -20,6 +20,9 @@ BASE_URL = "https://api.hubapi.com"
 # Lookback window in hours (e.g. 12 = last 12 hours)
 LOOKBACK_WINDOW_HOURS = 24
 
+# Signal threshold for minimum number of opens
+SIGNAL_THRESHOLD = 3
+
 # Compute "now minus LOOKBACK_WINDOW_HOURS" in Unix milliseconds (UTC)
 NOW_UTC = datetime.now(timezone.utc)
 LOOKBACK_DT = NOW_UTC - timedelta(hours=LOOKBACK_WINDOW_HOURS)
@@ -39,19 +42,18 @@ def require_env():
     if not HUBSPOT_APP_ID:
         missing.append("HUBSPOT_APP_ID")
     if missing:
-        print(f"Missing required env vars: {', '.join(missing)}", file=sys.stderr)
+        # print(f"Missing required env vars: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
-
 
 def hs_get(path, params=None):
     """Thin wrapper for GET with basic error handling."""
     url = f"{BASE_URL}{path}"
     resp = requests.get(url, headers=HEADERS, params=params or {})
     if not resp.ok:
-        print(
-            f"GET {url} failed ({resp.status_code}): {resp.text}",
-            file=sys.stderr,
-        )
+        # print(
+        #     f"GET {url} failed ({resp.status_code}): {resp.text}",
+        #     file=sys.stderr,
+        # )
         resp.raise_for_status()
     return resp.json()
 
@@ -106,7 +108,6 @@ def get_marketing_email_ids_for_campaign(campaign_guid):
 
     return email_ids
 
-
 def get_email_campaign_ids_for_email(email_id):
     """
     Uses Marketing Emails v3:
@@ -134,7 +135,6 @@ def get_email_campaign_ids_for_email(email_id):
             pass
 
     return sorted(email_campaign_ids)
-
 
 def get_open_events_for_email_campaign(email_campaign_id, app_id=HUBSPOT_APP_ID):
     """
@@ -169,48 +169,47 @@ def get_open_events_for_email_campaign(email_campaign_id, app_id=HUBSPOT_APP_ID)
 
     return events
 
-
 def get_open_counts_for_campaign(campaign_id):
     """
     Returns:
       dict[(emailId:str, emailCampaignId:int, recipient:str)] = open_count:int
     Only counts events with created >= LOOKBACK_TS.
     """
-    print(
-        f"Fetching marketing emails for campaign {campaign_id} "
-        f"(appId={HUBSPOT_APP_ID})...",
-        file=sys.stderr,
-    )
-    print(
-        f"Using lookback window: last {LOOKBACK_WINDOW_HOURS} hours "
-        f"(events created >= {LOOKBACK_TS})",
-        file=sys.stderr,
-    )
+    # print(
+    #     f"Fetching marketing emails for campaign {campaign_id} "
+    #     f"(appId={HUBSPOT_APP_ID})...",
+    #     file=sys.stderr,
+    # )
+    # print(
+    #     f"Using lookback window: last {LOOKBACK_WINDOW_HOURS} hours "
+    #     f"(events created >= {LOOKBACK_TS})",
+    #     file=sys.stderr,
+    # )
 
     email_ids = get_marketing_email_ids_for_campaign(campaign_id)
     if not email_ids:
-        print("No MARKETING_EMAIL assets found for this campaign.", file=sys.stderr)
+        # print("No MARKETING_EMAIL assets found for this campaign.", file=sys.stderr)
         return {}
 
-    print(f"Found {len(email_ids)} marketing emails.", file=sys.stderr)
+    # print(f"Found {len(email_ids)} marketing emails.", file=sys.stderr)
 
     open_counts = {}
 
     for email_id in email_ids:
         email_campaign_ids = get_email_campaign_ids_for_email(email_id)
         if not email_campaign_ids:
-            print(
-                f"  No legacy emailCampaignIds found for email {email_id}.",
-                file=sys.stderr,
-            )
+            # print(
+            #     f"  No legacy emailCampaignIds found for email {email_id}.",
+            #     file=sys.stderr,
+            # )
             continue
 
         for ecid in email_campaign_ids:
-            print(
-                f"  Fetching OPEN events for emailId={email_id}, "
-                f"emailCampaignId={ecid} (appId={HUBSPOT_APP_ID})",
-                file=sys.stderr,
-            )
+            # print(
+            #     f"  Fetching OPEN events for emailId={email_id}, "
+            #     f"emailCampaignId={ecid} (appId={HUBSPOT_APP_ID})",
+            #     file=sys.stderr,
+            # )
             open_events = get_open_events_for_email_campaign(ecid, HUBSPOT_APP_ID)
             if not open_events:
                 continue
@@ -276,7 +275,7 @@ def get_list_contacts(list_id, properties=None):
     batch_size = 100
 
     for i in range(0, len(contact_ids), batch_size):
-        batch_ids = contact_ids[i : i + batch_size]
+        batch_ids = contact_ids[i: i + batch_size]
         payload = {
             "properties": properties or [],
             "inputs": [{"id": cid} for cid in batch_ids],
@@ -287,7 +286,6 @@ def get_list_contacts(list_id, properties=None):
         contacts.extend(data.get("results", []))
 
     return contacts
-
 
 def get_contacts_by_pci_flag(list_id, property_name):
     contacts = get_list_contacts(list_id, properties=[property_name, "email"])
@@ -334,6 +332,10 @@ def main():
     # 3) Cross-reference: only include opens where recipient is in PCI-ELIGIBLE list
     # Final output: one JSON object per (eligible contact, emailId, emailCampaignId)
     for (email_id, ecid, recipient), count in sorted(open_counts.items()):
+        # Apply signal threshold: skip if below threshold
+        if count < SIGNAL_THRESHOLD:
+            continue
+
         contact = eligible_by_email.get(recipient)
         if not contact:
             # recipient not in the PCI_ELIGIBLE portion of the list; skip
@@ -348,9 +350,8 @@ def main():
         }
         print(json.dumps(record))
 
-
 if __name__ == "__main__":
     if not HUBSPOT_TOKEN:
-        print("HUBSPOT_TOKEN environment variable is not set.", file=sys.stderr)
+        # print("HUBSPOT_TOKEN environment variable is not set.", file=sys.stderr)
         sys.exit(1)
     main()
