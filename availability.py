@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -8,27 +9,35 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# =========================
+# Required environment vars
+# =========================
 TENANT_ID = os.environ["TENANT_ID"]
 CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 
+# =========================
+# Microsoft Graph settings
+# =========================
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+GRAPH_TIMEZONE = "Central Standard Time"  # Windows timezone name for Graph
 
-# Use a Windows timezone name in the Graph payload/header.
-# Graph examples and docs use Windows timezone names like "Central Standard Time".
-GRAPH_TIMEZONE = "Central Standard Time"
+# =========================
+# Local/business settings
+# =========================
+LOCAL_TZ = ZoneInfo("America/Chicago")
 
-# Your two users
 USER_1 = "SalesMarketing@nwmriskmanagement.com"
 USER_2 = "tom@nwmriskmanagement.com"
 
-# Query window
-START_LOCAL = datetime(2026, 4, 2, 9, 0, 0)
-END_LOCAL = datetime(2026, 4, 2, 17, 0, 0)
+BOOKING_WINDOW_START_HOURS = 36
+BOOKING_WINDOW_END_HOURS = 360
 
-# Slot size in minutes
+BUSINESS_DAY_START_HOUR = 9   # 9 AM
+BUSINESS_DAY_END_HOUR = 17    # 5 PM
+
 INTERVAL_MINUTES = 30
 
 
@@ -47,14 +56,27 @@ def get_access_token() -> str:
     return result["access_token"]
 
 
-def call_get_schedule(access_token: str, anchor_user: str, schedules: list[str],
-                      start_dt: datetime, end_dt: datetime, interval_minutes: int) -> dict:
-    """
-    anchor_user is just the user in the URL path:
-      /users/{anchor_user}/calendar/getSchedule
+def build_search_window() -> tuple[datetime, datetime]:
+    now_local = datetime.now(LOCAL_TZ)
 
-    The actual queried mailboxes are in the schedules array.
-    """
+    start_dt = now_local + timedelta(hours=BOOKING_WINDOW_START_HOURS)
+    end_dt = now_local + timedelta(hours=BOOKING_WINDOW_END_HOURS)
+
+    if end_dt <= start_dt:
+        raise ValueError("BOOKING_WINDOW_END_HOURS must be greater than BOOKING_WINDOW_START_HOURS")
+
+    # Send naive datetimes to Graph, paired with GRAPH_TIMEZONE in the payload
+    return start_dt.replace(tzinfo=None), end_dt.replace(tzinfo=None)
+
+
+def call_get_schedule(
+    access_token: str,
+    anchor_user: str,
+    schedules: list[str],
+    start_dt: datetime,
+    end_dt: datetime,
+    interval_minutes: int,
+) -> dict:
     url = f"{GRAPH_BASE}/users/{anchor_user}/calendar/getSchedule"
 
     headers = {
@@ -86,40 +108,32 @@ def call_get_schedule(access_token: str, anchor_user: str, schedules: list[str],
     return response.json()
 
 
-def mutual_free_slots(schedule_response: dict, start_dt: datetime, interval_minutes: int) -> list[tuple[datetime, datetime]]:
-    """
-    Use availabilityView from each schedule entry.
-    0 = free / working elsewhere
-    1 = tentative
-    2 = busy
-    3 = out of office
-
-    Conservative AND-logic:
-      only slots where every user has '0' are considered mutually free.
-    """
+def mutual_free_slots(
+    schedule_response: dict,
+    start_dt: datetime,
+    interval_minutes: int,
+) -> list[tuple[datetime, datetime]]:
     values = schedule_response.get("value", [])
     if len(values) < 2:
         raise ValueError("Expected at least two schedule results.")
 
     availability_strings = []
     for entry in values:
-        av = entry.get("availabilityView")
-        if not av:
+        availability_view = entry.get("availabilityView")
+        if availability_view is None:
             raise ValueError(f"Missing availabilityView for {entry.get('scheduleId')}")
-        availability_strings.append(av)
+        availability_strings.append(availability_view)
 
-    # Defensive: make sure lengths line up
     slot_count = min(len(s) for s in availability_strings)
 
-    free_ranges = []
-    current_start = None
+    free_ranges: list[tuple[datetime, datetime]] = []
+    current_start: datetime | None = None
 
     for i in range(slot_count):
-        chars = [s[i] for s in availability_strings]
-        everyone_free = all(c == "0" for c in chars)
+        slot_chars = [s[i] for s in availability_strings]
+        everyone_free = all(char == "0" for char in slot_chars)
 
         slot_start = start_dt + timedelta(minutes=i * interval_minutes)
-        slot_end = slot_start + timedelta(minutes=interval_minutes)
 
         if everyone_free:
             if current_start is None:
@@ -136,31 +150,125 @@ def mutual_free_slots(schedule_response: dict, start_dt: datetime, interval_minu
     return free_ranges
 
 
+def merge_adjacent_slots(
+    slots: list[tuple[datetime, datetime]]
+) -> list[tuple[datetime, datetime]]:
+    if not slots:
+        return []
+
+    sorted_slots = sorted(slots, key=lambda x: x[0])
+    merged = [sorted_slots[0]]
+
+    for start, end in sorted_slots[1:]:
+        last_start, last_end = merged[-1]
+        if start == last_end:
+            merged[-1] = (last_start, end)
+        else:
+            merged.append((start, end))
+
+    return merged
+
+
+def filter_to_business_hours(
+    free_slots: list[tuple[datetime, datetime]],
+    start_hour: int,
+    end_hour: int,
+    interval_minutes: int,
+) -> list[tuple[datetime, datetime]]:
+    filtered: list[tuple[datetime, datetime]] = []
+
+    for range_start, range_end in free_slots:
+        current = range_start
+
+        while current < range_end:
+            next_slot = min(current + timedelta(minutes=interval_minutes), range_end)
+
+            is_weekday = current.weekday() < 5
+            is_in_business_hours = start_hour <= current.hour < end_hour
+
+            if is_weekday and is_in_business_hours:
+                filtered.append((current, next_slot))
+
+            current = next_slot
+
+    return merge_adjacent_slots(filtered)
+
+
+def to_json_output(
+    search_start: datetime,
+    search_end: datetime,
+    graph_response: dict,
+    free_slots: list[tuple[datetime, datetime]],
+) -> dict:
+    raw_availability = []
+    for entry in graph_response.get("value", []):
+        raw_availability.append(
+            {
+                "schedule_id": entry.get("scheduleId"),
+                "availability_view": entry.get("availabilityView"),
+            }
+        )
+
+    mutual_slots = [
+        {
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        }
+        for start, end in free_slots
+    ]
+
+    return {
+        "query": {
+            "users": [USER_1, USER_2],
+            "booking_window_start_hours": BOOKING_WINDOW_START_HOURS,
+            "booking_window_end_hours": BOOKING_WINDOW_END_HOURS,
+            "business_day_start_hour": BUSINESS_DAY_START_HOUR,
+            "business_day_end_hour": BUSINESS_DAY_END_HOUR,
+            "interval_minutes": INTERVAL_MINUTES,
+            "search_window_start": search_start.isoformat(),
+            "search_window_end": search_end.isoformat(),
+            "local_timezone": str(LOCAL_TZ),
+            "graph_timezone": GRAPH_TIMEZONE,
+        },
+        "raw_availability": raw_availability,
+        "mutual_free_slots": mutual_slots,
+    }
+
+
 def main():
+    search_start, search_end = build_search_window()
     token = get_access_token()
 
-    response = call_get_schedule(
+    graph_response = call_get_schedule(
         access_token=token,
         anchor_user=USER_1,
         schedules=[USER_1, USER_2],
-        start_dt=START_LOCAL,
-        end_dt=END_LOCAL,
+        start_dt=search_start,
+        end_dt=search_end,
         interval_minutes=INTERVAL_MINUTES,
     )
 
-    print("Raw availabilityView values:")
-    for entry in response.get("value", []):
-        print(f"- {entry.get('scheduleId')}: {entry.get('availabilityView')}")
+    free_slots = mutual_free_slots(
+        schedule_response=graph_response,
+        start_dt=search_start,
+        interval_minutes=INTERVAL_MINUTES,
+    )
 
-    print("\nMutual free slots:")
-    free_slots = mutual_free_slots(response, START_LOCAL, INTERVAL_MINUTES)
+    free_slots = filter_to_business_hours(
+        free_slots=free_slots,
+        start_hour=BUSINESS_DAY_START_HOUR,
+        end_hour=BUSINESS_DAY_END_HOUR,
+        interval_minutes=INTERVAL_MINUTES,
+    )
 
-    if not free_slots:
-        print("No mutually free slots found.")
-        return
+    output = to_json_output(
+        search_start=search_start,
+        search_end=search_end,
+        graph_response=graph_response,
+        free_slots=free_slots,
+    )
 
-    for start_slot, end_slot in free_slots:
-        print(f"- {start_slot.isoformat()} to {end_slot.isoformat()}")
+    print(json.dumps(output, indent=2))
 
 
 if __name__ == "__main__":
