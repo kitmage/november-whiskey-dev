@@ -332,22 +332,21 @@ def main():
         }
 
     # 3) Cross-reference: only include opens where recipient is in PCI-ELIGIBLE list
-    # Final output: one line per (eligible contact, emailId, emailCampaignId) with openCount
-    print("contactId,email,emailId,emailCampaignId,openCount")
-
+    # Final output: one JSON object per (eligible contact, emailId, emailCampaignId)
     for (email_id, ecid, recipient), count in sorted(open_counts.items()):
         contact = eligible_by_email.get(recipient)
         if not contact:
             # recipient not in the PCI_ELIGIBLE portion of the list; skip
             continue
 
-        print(
-            f"{contact['id']},"
-            f"{contact['email']},"
-            f"{email_id},"
-            f"{ecid},"
-            f"{count}"
-        )
+        record = {
+            "contactId": contact["id"],
+            "email": contact["email"],
+            "emailId": email_id,
+            "emailCampaignId": ecid,
+            "openCount": count,
+        }
+        print(json.dumps(record))
 
 
 if __name__ == "__main__":
