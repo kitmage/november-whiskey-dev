@@ -56,11 +56,33 @@ def get_access_token() -> str:
     return result["access_token"]
 
 
+def ceil_to_interval(dt: datetime, interval_minutes: int) -> datetime:
+    """
+    Round a datetime up to the next interval boundary.
+    Examples for 30-minute intervals:
+      10:00:00 -> 10:00:00
+      10:01:00 -> 10:30:00
+      10:30:00 -> 10:30:00
+      10:31:00 -> 11:00:00
+    """
+    dt = dt.replace(second=0, microsecond=0)
+
+    minutes_past_interval = dt.minute % interval_minutes
+    if minutes_past_interval == 0:
+        return dt
+
+    minutes_to_add = interval_minutes - minutes_past_interval
+    return dt + timedelta(minutes=minutes_to_add)
+
+
 def build_search_window() -> tuple[datetime, datetime]:
     now_local = datetime.now(LOCAL_TZ)
 
-    start_dt = now_local + timedelta(hours=BOOKING_WINDOW_START_HOURS)
-    end_dt = now_local + timedelta(hours=BOOKING_WINDOW_END_HOURS)
+    raw_start_dt = now_local + timedelta(hours=BOOKING_WINDOW_START_HOURS)
+    raw_end_dt = now_local + timedelta(hours=BOOKING_WINDOW_END_HOURS)
+
+    start_dt = ceil_to_interval(raw_start_dt, INTERVAL_MINUTES)
+    end_dt = ceil_to_interval(raw_end_dt, INTERVAL_MINUTES)
 
     if end_dt <= start_dt:
         raise ValueError("BOOKING_WINDOW_END_HOURS must be greater than BOOKING_WINDOW_START_HOURS")
