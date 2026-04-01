@@ -329,8 +329,9 @@ def main():
             "do_not_send_pci": False,  # by definition of pci_eligible
         }
 
-    # 3) Cross-reference: only include opens where recipient is in PCI-ELIGIBLE list
-    # Final output: one JSON object per (eligible contact, emailId, emailCampaignId)
+    # 3) Aggregate above-threshold opens per contact
+    aggregated_by_contact = {}  # key: contactId, value: {"contactId", "email", "openCount"}
+
     for (email_id, ecid, recipient), count in sorted(open_counts.items()):
         # Apply signal threshold: skip if below threshold
         if count < SIGNAL_THRESHOLD:
@@ -341,14 +342,20 @@ def main():
             # recipient not in the PCI_ELIGIBLE portion of the list; skip
             continue
 
-        record = {
-            "contactId": contact["id"],
-            "email": contact["email"],
-            "emailId": email_id,
-            "emailCampaignId": ecid,
-            "openCount": count,
-        }
-        print(json.dumps(record))
+        contact_id = contact["id"]
+        if contact_id not in aggregated_by_contact:
+            aggregated_by_contact[contact_id] = {
+                "contactId": contact_id,
+                "email": contact["email"],
+                "openCount": 0,
+            }
+
+        # Only counts that already passed the threshold are accumulated
+        aggregated_by_contact[contact_id]["openCount"] += count
+
+    # 4) Print one JSON row per contact with cumulative above-threshold openCount
+    for contact_summary in aggregated_by_contact.values():
+        print(json.dumps(contact_summary))
 
 if __name__ == "__main__":
     if not HUBSPOT_TOKEN:
