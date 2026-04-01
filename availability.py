@@ -21,7 +21,7 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 GRAPH_TIMEZONE = "Central Standard Time"
 
 # Your two users
-USER_1 = "salesmarketing@nwmriskmonitoring.com"
+USER_1 = "SalesMarketing@nwmriskmanagement.com"
 USER_2 = "tom@nwmriskmanagement.com"
 
 # Query window
