@@ -202,6 +202,10 @@ def resolve_customer_identities(args: argparse.Namespace) -> List[Tuple[str, str
     if not signal_contacts and (not cli_name or not cli_email):
         signal_contacts = fetch_signal_contacts()
 
+    # If only one of the CLI identity fields is provided, fail fast.
+    if bool(cli_name) != bool(cli_email):
+        raise RuntimeError("Provide both --customer-name and --customer-email, or neither.")
+
     # If both values are explicitly provided, treat as a single-contact run.
     if cli_name and cli_email:
         return [(cli_name, cli_email)]
@@ -212,12 +216,6 @@ def resolve_customer_identities(args: argparse.Namespace) -> List[Tuple[str, str
         email = cli_email or str(signal.get("email") or "").strip()
         if name and email:
             identities.append((name, email))
-
-    if not identities:
-        raise RuntimeError(
-            "Unable to determine any customer identities. "
-            'Provide --customer-name/--customer-email, or provide signal data with "fullName" and "email".'
-        )
 
     return identities
 
@@ -347,8 +345,11 @@ def send_contact_to_form_submitter(customer_name: str, customer_email: str, dry_
 
 def main() -> None:
     args = parse_args()
-    mike_email = load_env("MIKE_ID")
     customer_identities = resolve_customer_identities(args)
+    if not customer_identities:
+        print("null")
+        return
+    mike_email = load_env("MIKE_ID")
 
     # Authenticate once, then reuse the session-backed client for API calls.
     token = get_access_token()
