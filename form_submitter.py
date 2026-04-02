@@ -12,8 +12,12 @@ import requests
 HUBSPOT_TOKEN = os.environ.get("HUBSPOT_TOKEN")
 HUBSPOT_APP_ID = int(os.environ.get("HUBSPOT_APP_ID", "2286"))  # not strictly needed here, but available
 
+# HubSpot portal + form configuration
+PORTAL_ID = "5526411"
 FORM_ID = "2710c2e4-faad-4ddc-83af-faa9520d81a4"
-BASE_URL = "https://api.hubapi.com"
+
+# NOTE: Marketing Forms v3 integration submit uses api.hsforms.com, not api.hubapi.com
+BASE_URL = "https://api.hsforms.com"
 
 
 def parse_args() -> argparse.Namespace:
@@ -95,38 +99,57 @@ def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
 
     submission = {
         "fields": fields,
-        # Legal basis & consent / context can be added here if needed
-        # "context": {...},
-        # "legalConsentOptions": {...},
+        # Add context / legalConsentOptions here if needed, e.g.:
+        # "context": {
+        #     "pageUri": "https://example.com",
+        #     "pageName": "Signal trigger form",
+        # },
+        # "legalConsentOptions": {
+        #     "consent": {
+        #         "consentToProcess": True,
+        #         "text": "I agree to allow NWM Risk Management to store and process my data.",
+        #         "communications": [
+        #             {
+        #                 "value": True,
+        #                 "subscriptionTypeId": 999,
+        #                 "text": "I agree to receive marketing communications.",
+        #             }
+        #         ],
+        #     }
+        # },
     }
     return submission
 
 
-def submit_form(email: str, submission_data: Dict[str, Any], dry_run: bool = False) -> None:
+def submit_form(email: str, submission_data: Dict[str, Any], dry_run: bool = False) -> bool:
     """
     Submit a single form submission for the given email.
+
+    Returns True on success, False on failure.
     """
 
     if dry_run:
         # Dry-run mode preserves parsing/validation behavior while avoiding writes
         # to HubSpot; useful for testing pipelines end-to-end.
         print(f"[DRY RUN] Would submit for {email}: {json.dumps(submission_data)}")
-        return
+        return True
 
     if not HUBSPOT_TOKEN:
         raise RuntimeError("HUBSPOT_TOKEN is not set in environment")
-    
-    url = f"{BASE_URL}/forms/v2/forms/{FORM_ID}/submissions"
+
+    # Marketing Forms v3 integration submit endpoint
+    url = f"{BASE_URL}/submissions/v3/integration/submit/{PORTAL_ID}/{FORM_ID}"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
         "Content-Type": "application/json",
     }
 
-    # Endpoint expects v2 form submission payload with a `fields` array.
+    # Endpoint expects a payload with a `fields` array.
     resp = requests.post(url, headers=headers, json=submission_data)
 
-    if resp.status_code >= 200 and resp.status_code < 300:
+    if 200 <= resp.status_code < 300:
         print(f"Submitted form for {email} (status={resp.status_code})")
+        return True
     else:
         # Print some diagnostics but keep going
         print(
@@ -134,9 +157,10 @@ def submit_form(email: str, submission_data: Dict[str, Any], dry_run: bool = Fal
             f"(status={resp.status_code}): {resp.text}",
             file=sys.stderr,
         )
+        return False
 
 
-def main():
+def main() -> None:
     args = parse_args()
 
     if not HUBSPOT_TOKEN and not args.dry_run:
@@ -179,9 +203,8 @@ def main():
 
         # Transform signal event fields into the exact HubSpot form payload schema.
         submission_data = extract_submission_data(event)
-        submit_form(email, submission_data, dry_run=args.dry_run)
-
-        count_submitted += 1
+        if submit_form(email, submission_data, dry_run=args.dry_run):
+            count_submitted += 1
 
         # Optional small delay if you're worried about rate limits
         time.sleep(0.05)
