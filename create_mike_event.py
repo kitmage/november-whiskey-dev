@@ -333,6 +333,18 @@ def build_event_body(
     }
 
 
+def send_contact_to_form_submitter(customer_name: str, customer_email: str, dry_run: bool) -> bool:
+    """Forward contact info to form_submitter.py helpers after scheduling."""
+    from form_submitter import extract_submission_data, submit_form
+
+    signal_event = {
+        "email": customer_email,
+        "fullName": customer_name,
+    }
+    submission_data = extract_submission_data(signal_event)
+    return submit_form(customer_email, submission_data, dry_run=dry_run)
+
+
 def main() -> None:
     args = parse_args()
     mike_email = load_env("MIKE_ID")
@@ -364,6 +376,11 @@ def main() -> None:
         else:
             # Create the event directly on Mike's calendar.
             result = client.post(f"/users/{mike_email}/events", event_body)
+            form_submitted = send_contact_to_form_submitter(
+                customer_name=customer_name,
+                customer_email=customer_email,
+                dry_run=args.dry_run,
+            )
             outputs.append({
                 "target_calendar_user": mike_email,
                 "customer_name": customer_name,
@@ -373,6 +390,7 @@ def main() -> None:
                 "subject": result.get("subject"),
                 "start": result.get("start"),
                 "end": result.get("end"),
+                "form_submitted": form_submitted,
             })
 
         # Keep a small gap between event creations to be friendlier to upstream APIs.
