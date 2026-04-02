@@ -2,11 +2,11 @@
 """
 create_mike_event.py
 
-Reads best_start_time JSON from availability.py and creates a calendar event
+Fetches best_start_time from availability.py and creates a calendar event
 directly on Mike's Outlook calendar.
 
 Example:
-  python3 availability.py | python3 create_mike_event.py \
+  python3 create_mike_event.py \
     --customer-name "Prospect Name" \
     --customer-email "prospect@example.com" \
     --dry-run
@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -38,7 +39,10 @@ class GraphError(RuntimeError):
 def parse_args() -> argparse.Namespace:
     """Parse event metadata and execution mode flags for Graph event creation."""
     parser = argparse.ArgumentParser(description="Create an Outlook calendar event on Mike's calendar.")
-    parser.add_argument("--input", help="Path to JSON file from availability.py. If omitted, reads stdin.")
+    parser.add_argument(
+        "--input",
+        help="Optional path to JSON file from availability.py. If omitted, availability.py is executed.",
+    )
     parser.add_argument("--customer-name", required=True)
     parser.add_argument("--customer-email", required=True)
     parser.add_argument("--customer-phone", default="")
@@ -60,11 +64,11 @@ def load_env(name: str) -> str:
 
 
 def read_input_json(path: Optional[str]) -> Dict[str, Any]:
-    """Load availability payload from file or stdin to support pipeline usage."""
+    """Load availability payload from file."""
     if path:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return json.load(sys.stdin)
+    raise RuntimeError("--input path is required when reading from a file.")
 
 
 def require_best_start(payload: Dict[str, Any]) -> str:
@@ -80,6 +84,23 @@ def require_best_start(payload: Dict[str, Any]) -> str:
     if not isinstance(start, str) or not start:
         raise RuntimeError('"best_start_time.start" is missing or invalid.')
     return start
+
+
+def fetch_best_start_from_availability() -> str:
+    """Run availability.py and extract the selected start time from its JSON output."""
+    result = subprocess.run(
+        [sys.executable, "availability.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"availability.py produced invalid JSON output: {exc}") from exc
+
+    return require_best_start(payload)
 
 
 def get_access_token() -> str:
@@ -192,8 +213,11 @@ def main() -> None:
     args = parse_args()
     mike_email = load_env("MIKE_ID")
 
-    input_payload = read_input_json(args.input)
-    best_start = require_best_start(input_payload)
+    if args.input:
+        input_payload = read_input_json(args.input)
+        best_start = require_best_start(input_payload)
+    else:
+        best_start = fetch_best_start_from_availability()
 
     # Authenticate once, then reuse the session-backed client for API calls.
     token = get_access_token()
