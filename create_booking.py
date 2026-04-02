@@ -30,6 +30,7 @@ GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 TOKEN_URL_TMPL = "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
 DEFAULT_BOOKING_BUSINESS_EMAIL = "DiscoveryCall@nwmonitoring.com"
+DEFAULT_SERVICE_NAME = "30-min meeting"
 DEFAULT_TIMEZONE = "Pacific Standard Time"
 DEFAULT_DURATION_MINUTES = 30
 
@@ -42,7 +43,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create a Microsoft Bookings appointment from best_start_time JSON.")
     parser.add_argument("--input", help="Path to JSON file from availability.py. If omitted, reads from stdin.")
     parser.add_argument("--booking-business-email", default=DEFAULT_BOOKING_BUSINESS_EMAIL)
-    parser.add_argument("--service-name", help="Exact Bookings service display name. If omitted, first service is used.")
+    parser.add_argument("--service-name", default=DEFAULT_SERVICE_NAME,
+                        help="Exact Bookings service display name.")
     parser.add_argument("--customer-name", required=True)
     parser.add_argument("--customer-email", required=True)
     parser.add_argument("--customer-phone", default="")
