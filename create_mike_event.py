@@ -79,6 +79,40 @@ def load_signal_json(path: Optional[str]) -> Dict[str, Any]:
         return json.load(f)
 
 
+def fetch_signal_json() -> Dict[str, Any]:
+    """
+    Run signal_finder.py and return the first contact-like JSON object.
+
+    Expected shape includes keys like: contactId, email, fullName, openCount.
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "signal_finder.py"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        raise RuntimeError(
+            "signal_finder.py failed while resolving customer identity"
+            + (f": {stderr}" if stderr else "")
+        ) from exc
+
+    for line in (result.stdout or "").splitlines():
+        line = line.strip()
+        if not line.startswith("{") or not line.endswith("}"):
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict) and ("email" in payload or "fullName" in payload):
+            return payload
+
+    return {}
+
+
 def require_best_start(payload: Dict[str, Any]) -> str:
     """
     Validate the `availability.py` output contract and extract start datetime.
@@ -112,8 +146,11 @@ def fetch_best_start_from_availability() -> str:
 
 
 def resolve_customer_identity(args: argparse.Namespace) -> tuple[str, str]:
-    """Resolve customer name/email from CLI args first, then signal_finder output."""
-    signal = load_signal_json(args.signal_input)
+    """Resolve customer name/email from CLI args, then signal input/file output."""
+    signal = load_signal_json(args.signal_input) if args.signal_input else {}
+
+    if not signal and (not args.customer_name or not args.customer_email):
+        signal = fetch_signal_json()
 
     customer_name = (args.customer_name or "").strip()
     customer_email = (args.customer_email or "").strip()
