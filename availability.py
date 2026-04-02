@@ -216,19 +216,62 @@ def filter_to_business_hours(
     return filtered
 
 
-def expand_slots_to_starts(
+def expand_slots_to_scored_starts(
     slots: list[tuple[datetime, datetime]],
     interval_minutes: int,
-) -> list[str]:
-    starts: list[str] = []
+) -> list[dict]:
+    """
+    Converts free slot ranges into 30-minute starts with a score based on
+    contiguous free-time buffer on both sides.
+
+    score = min(buffer_before_blocks, buffer_after_blocks)
+
+    Example output item:
+    {
+      "start": "2026-04-07T13:30:00",
+      "score": 1,
+      "buffer_before_blocks": 1,
+      "buffer_after_blocks": 3
+    }
+    """
+    starts: list[datetime] = []
 
     for start, end in slots:
         current = start
         while current < end:
-            starts.append(current.isoformat())
+            starts.append(current)
             current += timedelta(minutes=interval_minutes)
 
-    return starts
+    if not starts:
+        return []
+
+    interval = timedelta(minutes=interval_minutes)
+
+    scored: list[dict] = []
+
+    for i, current in enumerate(starts):
+        buffer_before = 0
+        j = i - 1
+        while j >= 0 and starts[j + 1] - starts[j] == interval:
+            buffer_before += 1
+            j -= 1
+
+        buffer_after = 0
+        j = i + 1
+        while j < len(starts) and starts[j] - starts[j - 1] == interval:
+            buffer_after += 1
+            j += 1
+
+        score = min(buffer_before, buffer_after)
+
+        scored.append({
+            "start": current.isoformat(),
+            "score": score,
+            "buffer_before_blocks": buffer_before,
+            "buffer_after_blocks": buffer_after,
+        })
+
+    return scored
 
 
 def main():
@@ -265,11 +308,11 @@ def main():
         lunch_end_minute=LUNCH_BREAK_END_MINUTE,
     )
 
-    available_start_times = expand_slots_to_starts(
+    available_start_times = expand_slots_to_scored_starts(
         slots=free_slots,
         interval_minutes=INTERVAL_MINUTES,
     )
-
+    
     print(json.dumps({"available_start_times": available_start_times}, indent=2))
 
 if __name__ == "__main__":
