@@ -42,7 +42,7 @@ BOOKING_WINDOW_START_HOURS = 144
 BOOKING_WINDOW_END_HOURS = 240
 
 BUSINESS_DAY_START_HOUR = 10   # 10:00 AM
-BUSINESS_DAY_END_HOUR = 16    # 4:00 PM
+BUSINESS_DAY_END_HOUR = 16     # 4:00 PM
 
 LUNCH_BREAK_START_HOUR = 11
 LUNCH_BREAK_START_MINUTE = 30
@@ -220,20 +220,6 @@ def expand_slots_to_scored_starts(
     slots: list[tuple[datetime, datetime]],
     interval_minutes: int,
 ) -> list[dict]:
-    """
-    Converts free slot ranges into 30-minute starts with a score based on
-    contiguous free-time buffer on both sides.
-
-    score = min(buffer_before_blocks, buffer_after_blocks)
-
-    Example output item:
-    {
-      "start": "2026-04-07T13:30:00",
-      "score": 1,
-      "buffer_before_blocks": 1,
-      "buffer_after_blocks": 3
-    }
-    """
     starts: list[datetime] = []
 
     for start, end in slots:
@@ -246,7 +232,6 @@ def expand_slots_to_scored_starts(
         return []
 
     interval = timedelta(minutes=interval_minutes)
-
     scored: list[dict] = []
 
     for i, current in enumerate(starts):
@@ -265,13 +250,31 @@ def expand_slots_to_scored_starts(
         score = min(buffer_before, buffer_after)
 
         scored.append({
-            "start": current.isoformat(),
+            "start": current,
             "score": score,
             "buffer_before_blocks": buffer_before,
             "buffer_after_blocks": buffer_after,
         })
 
     return scored
+
+
+def select_earliest_best_start(scored_starts: list[dict]) -> dict | None:
+    if not scored_starts:
+        return None
+
+    best = max(scored_starts, key=lambda x: x["score"])
+    best_score = best["score"]
+
+    best_candidates = [s for s in scored_starts if s["score"] == best_score]
+    earliest_best = min(best_candidates, key=lambda x: x["start"])
+
+    return {
+        "start": earliest_best["start"].isoformat(),
+        "score": earliest_best["score"],
+        "buffer_before_blocks": earliest_best["buffer_before_blocks"],
+        "buffer_after_blocks": earliest_best["buffer_after_blocks"],
+    }
 
 
 def main():
@@ -308,12 +311,15 @@ def main():
         lunch_end_minute=LUNCH_BREAK_END_MINUTE,
     )
 
-    available_start_times = expand_slots_to_scored_starts(
+    scored_starts = expand_slots_to_scored_starts(
         slots=free_slots,
         interval_minutes=INTERVAL_MINUTES,
     )
-    
-    print(json.dumps({"available_start_times": available_start_times}, indent=2))
+
+    best_start = select_earliest_best_start(scored_starts)
+
+    print(json.dumps({"best_start_time": best_start}, indent=2))
+
 
 if __name__ == "__main__":
     main()
