@@ -4,7 +4,8 @@ import sys
 import json
 import time
 import argparse
-from typing import Dict, Any, Optional
+import subprocess
+from typing import Dict, Any
 
 import requests
 
@@ -16,15 +17,9 @@ BASE_URL = "https://api.hubapi.com"
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse CLI flags for input source selection and safe dry-run execution."""
+    """Parse CLI flags for safe dry-run execution."""
     parser = argparse.ArgumentParser(
         description="Submit contacts (from signal_finder.py JSON lines) to a HubSpot form."
-    )
-    parser.add_argument(
-        "--input",
-        "-i",
-        help="Input file with JSON lines; defaults to stdin.",
-        default=None,
     )
     parser.add_argument(
         "--dry-run",
@@ -34,15 +29,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_lines(path: Optional[str]):
-    """Yield lines from stdin or from a file."""
-    if path:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                yield line
-    else:
-        for line in sys.stdin:
-            yield line
+def get_signal_finder_output_lines() -> list[str]:
+    """
+    Run `signal_finder.py` and return its stdout as individual lines.
+
+    The script is executed with the current Python interpreter so it uses the
+    same environment (including HubSpot credentials).
+    """
+    proc = subprocess.run(
+        [sys.executable, "signal_finder.py"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        raise RuntimeError(
+            f"signal_finder.py failed with exit code {proc.returncode}"
+            + (f": {stderr}" if stderr else "")
+        )
+
+    return (proc.stdout or "").splitlines()
 
 
 def is_contact_event_line(line: str) -> bool:
@@ -135,19 +143,25 @@ def main():
         print("Error: HUBSPOT_TOKEN environment variable is required.", file=sys.stderr)
         sys.exit(1)
 
-    print("Reading contact events and submitting to HubSpot form...")
+    print("Running signal_finder.py to collect contact events...")
 
     count_total = 0
     count_submitted = 0
 
-    # The reader may consume either stdin piping or a newline-delimited file.
-    for raw_line in read_lines(args.input):
+    # Per workflow contract, always source fresh events from signal_finder.py.
+    signal_lines = get_signal_finder_output_lines()
+    if not signal_lines:
+        print("null")
+        return
+
+    contact_lines = [line for line in signal_lines if is_contact_event_line(line)]
+    if not contact_lines:
+        print("null")
+        return
+
+    for raw_line in contact_lines:
         raw_line = raw_line.strip()
         if not raw_line:
-            continue
-
-        # signal_finder output can include non-JSON logs; guard before parse.
-        if not is_contact_event_line(raw_line):
             continue
 
         try:
