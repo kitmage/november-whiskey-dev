@@ -23,7 +23,7 @@ CAMPAIGN_ID = "6afccccd-1f8b-4036-ba17-3eea85f23a05"
 BASE_URL = "https://api.hubapi.com"
 
 # Lookback window in hours (e.g. 12 = last 12 hours)
-LOOKBACK_WINDOW_HOURS = 36
+LOOKBACK_WINDOW_HOURS = 360
 
 # Signal threshold for minimum number of opens
 SIGNAL_THRESHOLD = 3
