@@ -33,7 +33,7 @@ USER_1 = "SalesMarketing@nwmriskmanagement.com"
 USER_2 = "tom@nwmriskmanagement.com"
 
 BOOKING_WINDOW_START_HOURS = 24
-BOOKING_WINDOW_END_HOURS = 72
+BOOKING_WINDOW_END_HOURS = 360
 
 BUSINESS_DAY_START_HOUR = 9   # 9 AM
 BUSINESS_DAY_END_HOUR = 16    # 4 PM
