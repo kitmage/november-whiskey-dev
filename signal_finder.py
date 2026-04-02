@@ -1,7 +1,8 @@
 """
 This is the first step in the automation.
 This script should be scheduled to run periodically, probably via cron.
-It scans Open activities in HubSpot and updates opens.jsonl accordingly.
+This script scans for an inent signal in HubSpot defined as a number of Opens above a defined threshold.
+Use it as an input to form_submitter.py
 """
 
 import os
