@@ -28,7 +28,7 @@ GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 TOKEN_URL_TMPL = "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 DEFAULT_TIMEZONE = "Pacific Standard Time"
 DEFAULT_DURATION_MINUTES = 30
-DEFAULT_SUBJECT_TEMPLATE = "Discovery Call - {customer_name}"
+DEFAULT_SUBJECT_TEMPLATE = "30min Meeting - {customer_name}"
 
 
 class GraphError(RuntimeError):
