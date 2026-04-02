@@ -1,3 +1,10 @@
+"""
+This is the first step in the automation.
+This script should be scheduled to run periodically, probably via cron.
+This script scans for an inent signal in HubSpot defined as a number of Opens above a defined threshold.
+Use it as an input to form_submitter.py
+"""
+
 import os
 import sys
 import json
@@ -18,7 +25,7 @@ CAMPAIGN_ID = "6afccccd-1f8b-4036-ba17-3eea85f23a05"
 BASE_URL = "https://api.hubapi.com"
 
 # Lookback window in hours (e.g. 12 = last 12 hours)
-LOOKBACK_WINDOW_HOURS = 360
+LOOKBACK_WINDOW_HOURS = 36
 
 # Signal threshold for minimum number of opens
 SIGNAL_THRESHOLD = 3
