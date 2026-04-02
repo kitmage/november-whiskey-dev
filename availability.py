@@ -17,6 +17,10 @@ CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 ROB_ID = os.environ["ROB_ID"]
 TOM_ID = os.environ["TOM_ID"]
+MIKE_ID = os.environ["MIKE_ID"]
+# Add more env vars as needed, e.g.:
+# JANE_ID = os.environ["JANE_ID"]
+# SUE_ID = os.environ["SUE_ID"]
 
 # =========================
 # Microsoft Graph settings
@@ -31,11 +35,17 @@ GRAPH_TIMEZONE = "Central Standard Time"  # Windows timezone name for Graph
 # =========================
 LOCAL_TZ = ZoneInfo("America/Chicago")
 
-USER_1 = TOM_ID
-USER_2 = ROB_ID
+# Define any number of users here
+USERS = [
+    TOM_ID,
+    ROB_ID,
+    MIKE_ID,
+    # JANE_ID,
+    # SUE_ID,
+]
 
-BOOKING_WINDOW_START_HOURS = 24
-BOOKING_WINDOW_END_HOURS = 360
+BOOKING_WINDOW_START_HOURS = 36
+BOOKING_WINDOW_END_HOURS = 120
 
 BUSINESS_DAY_START_HOUR = 9   # 9 AM
 BUSINESS_DAY_END_HOUR = 16    # 4 PM
@@ -138,8 +148,8 @@ def mutual_free_slots(
     interval_minutes: int,
 ) -> list[tuple[datetime, datetime]]:
     values = schedule_response.get("value", [])
-    if len(values) < 2:
-        raise ValueError("Expected at least two schedule results.")
+    if len(values) < 1:
+        raise ValueError("Expected at least one schedule result.")
 
     availability_strings = []
     for entry in values:
@@ -223,6 +233,7 @@ def to_json_output(
     search_end: datetime,
     graph_response: dict,
     free_slots: list[tuple[datetime, datetime]],
+    users: list[str],
 ) -> dict:
     raw_availability = []
     for entry in graph_response.get("value", []):
@@ -243,7 +254,7 @@ def to_json_output(
 
     return {
         "query": {
-            "users": [USER_1, USER_2],
+            "users": users,
             "booking_window_start_hours": BOOKING_WINDOW_START_HOURS,
             "booking_window_end_hours": BOOKING_WINDOW_END_HOURS,
             "business_day_start_hour": BUSINESS_DAY_START_HOUR,
@@ -260,13 +271,22 @@ def to_json_output(
 
 
 def main():
+    if not USERS:
+        raise ValueError("USERS must contain at least one user.")
+    if len(USERS) < 2:
+        raise ValueError("USERS must contain at least two users for comparison.")
+
     search_start, search_end = build_search_window()
     token = get_access_token()
 
+    # Graph requires the endpoint to be called from some user context;
+    # using the first user as anchor is fine.
+    anchor_user = USERS[0]
+
     graph_response = call_get_schedule(
         access_token=token,
-        anchor_user=USER_1,
-        schedules=[USER_1, USER_2],
+        anchor_user=anchor_user,
+        schedules=USERS,
         start_dt=search_start,
         end_dt=search_end,
         interval_minutes=INTERVAL_MINUTES,
@@ -290,6 +310,7 @@ def main():
         search_end=search_end,
         graph_response=graph_response,
         free_slots=free_slots,
+        users=USERS,
     )
 
     print(json.dumps(output, indent=2))
