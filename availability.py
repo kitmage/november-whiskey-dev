@@ -53,6 +53,7 @@ INTERVAL_MINUTES = 30
 
 
 def get_access_token() -> str:
+    """Acquire an app-only Microsoft Graph token using client credentials."""
     app = msal.ConfidentialClientApplication(
         client_id=CLIENT_ID,
         authority=AUTHORITY,
@@ -68,6 +69,7 @@ def get_access_token() -> str:
 
 
 def ceil_to_interval(dt: datetime, interval_minutes: int) -> datetime:
+    """Round a datetime up to the next slot boundary used by Graph availabilityView."""
     dt = dt.replace(second=0, microsecond=0)
 
     minutes_past_interval = dt.minute % interval_minutes
@@ -79,6 +81,12 @@ def ceil_to_interval(dt: datetime, interval_minutes: int) -> datetime:
 
 
 def build_search_window() -> tuple[datetime, datetime]:
+    """
+    Compute the local search window for booking and return naive datetimes.
+
+    Returned values are naive by design because Graph receives an explicit
+    `timeZone` in the request payload (`GRAPH_TIMEZONE`).
+    """
     now_local = datetime.now(LOCAL_TZ)
 
     raw_start_dt = now_local + timedelta(hours=BOOKING_WINDOW_START_HOURS)
@@ -101,6 +109,7 @@ def call_get_schedule(
     end_dt: datetime,
     interval_minutes: int,
 ) -> dict:
+    """Call Graph `getSchedule` for all users using one anchor mailbox endpoint."""
     url = f"{GRAPH_BASE}/users/{anchor_user}/calendar/getSchedule"
 
     headers = {
@@ -122,6 +131,7 @@ def call_get_schedule(
         "availabilityViewInterval": interval_minutes,
     }
 
+    # `availabilityViewInterval` controls the granularity of the response string.
     response = requests.post(url, headers=headers, json=payload, timeout=30)
 
     if response.status_code != 200:
@@ -135,6 +145,12 @@ def mutual_free_slots(
     start_dt: datetime,
     interval_minutes: int,
 ) -> list[tuple[datetime, datetime]]:
+    """
+    Convert Graph availability strings into contiguous ranges where everyone is free.
+
+    Graph returns one character per interval (`0` means free). We align all user
+    strings by index and keep only intervals where every user has `0`.
+    """
     values = schedule_response.get("value", [])
     if not values:
         raise ValueError("Expected at least one schedule result.")
@@ -146,6 +162,7 @@ def mutual_free_slots(
             raise ValueError(f"Missing availabilityView for {entry.get('scheduleId')}")
         availability_strings.append(availability_view)
 
+    # Use the shortest string defensively in case Graph returns uneven lengths.
     slot_count = min(len(s) for s in availability_strings)
 
     free_ranges: list[tuple[datetime, datetime]] = []
@@ -182,6 +199,7 @@ def filter_to_business_hours(
     lunch_end_hour: int,
     lunch_end_minute: int,
 ) -> list[tuple[datetime, datetime]]:
+    """Filter free ranges down to weekday business slots, excluding lunch overlap."""
     filtered: list[tuple[datetime, datetime]] = []
 
     for range_start, range_end in free_slots:
@@ -220,6 +238,12 @@ def expand_slots_to_scored_starts(
     slots: list[tuple[datetime, datetime]],
     interval_minutes: int,
 ) -> list[dict]:
+    """
+    Score each possible start by surrounding free-space buffer.
+
+    Higher score means more contiguous free blocks on both sides, favoring starts
+    that are less likely to collide with adjacent meetings.
+    """
     starts: list[datetime] = []
 
     for start, end in slots:
@@ -260,6 +284,7 @@ def expand_slots_to_scored_starts(
 
 
 def select_earliest_best_start(scored_starts: list[dict]) -> dict | None:
+    """Pick the highest-scoring start; break ties by earliest datetime."""
     if not scored_starts:
         return None
 
@@ -285,6 +310,7 @@ def main():
     token = get_access_token()
     anchor_user = USERS[0]
 
+    # 1) Pull raw schedule availability from Graph.
     graph_response = call_get_schedule(
         access_token=token,
         anchor_user=anchor_user,
@@ -294,12 +320,14 @@ def main():
         interval_minutes=INTERVAL_MINUTES,
     )
 
+    # 2) Keep only intervals where all selected users are simultaneously free.
     free_slots = mutual_free_slots(
         schedule_response=graph_response,
         start_dt=search_start,
         interval_minutes=INTERVAL_MINUTES,
     )
 
+    # 3) Restrict to bookable business hours and remove lunch-time overlap.
     free_slots = filter_to_business_hours(
         free_slots=free_slots,
         start_hour=BUSINESS_DAY_START_HOUR,
@@ -311,6 +339,7 @@ def main():
         lunch_end_minute=LUNCH_BREAK_END_MINUTE,
     )
 
+    # 4) Score candidate starts by buffer on each side, then choose best.
     scored_starts = expand_slots_to_scored_starts(
         slots=free_slots,
         interval_minutes=INTERVAL_MINUTES,

@@ -4,7 +4,8 @@ import sys
 import json
 import time
 import argparse
-from typing import Dict, Any, Optional
+import subprocess
+from typing import Dict, Any
 
 import requests
 
@@ -16,14 +17,9 @@ BASE_URL = "https://api.hubapi.com"
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI flags for safe dry-run execution."""
     parser = argparse.ArgumentParser(
         description="Submit contacts (from signal_finder.py JSON lines) to a HubSpot form."
-    )
-    parser.add_argument(
-        "--input",
-        "-i",
-        help="Input file with JSON lines; defaults to stdin.",
-        default=None,
     )
     parser.add_argument(
         "--dry-run",
@@ -33,15 +29,28 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def read_lines(path: Optional[str]):
-    """Yield lines from stdin or from a file."""
-    if path:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                yield line
-    else:
-        for line in sys.stdin:
-            yield line
+def get_signal_finder_output_lines() -> list[str]:
+    """
+    Run `signal_finder.py` and return its stdout as individual lines.
+
+    The script is executed with the current Python interpreter so it uses the
+    same environment (including HubSpot credentials).
+    """
+    proc = subprocess.run(
+        [sys.executable, "signal_finder.py"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if proc.returncode != 0:
+        stderr = (proc.stderr or "").strip()
+        raise RuntimeError(
+            f"signal_finder.py failed with exit code {proc.returncode}"
+            + (f": {stderr}" if stderr else "")
+        )
+
+    return (proc.stdout or "").splitlines()
 
 
 def is_contact_event_line(line: str) -> bool:
@@ -54,7 +63,8 @@ def is_contact_event_line(line: str) -> bool:
     except json.JSONDecodeError:
         return False
 
-    # Expect at minimum these keys from your example
+    # Minimal contract from signal_finder output:
+    # {"contactId": "...", "email": "...", "openCount": N}
     return "email" in obj and "contactId" in obj
 
 
@@ -65,7 +75,8 @@ def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
     Adjust 'fields' list if your HubSpot form has more fields you want to populate.
     """
     email = event.get("email")
-    # You can also send openCount, emailId, etc. as hidden fields if your form has them.
+    # Only `email` is required for this workflow. Additional values are forwarded
+    # when present so the form can capture engagement context for routing/scoring.
     open_count = event.get("openCount")
     email_id = event.get("emailId")
     email_campaign_id = event.get("emailCampaignId")
@@ -74,7 +85,7 @@ def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
         {"name": "email", "value": email},
     ]
 
-    # Optional hidden fields (only if these exist as form fields)
+    # Optional hidden fields (only if corresponding fields exist on the form).
     if open_count is not None:
         fields.append({"name": "open_count", "value": str(open_count)})
     if email_id is not None:
@@ -97,6 +108,8 @@ def submit_form(email: str, submission_data: Dict[str, Any], dry_run: bool = Fal
     """
 
     if dry_run:
+        # Dry-run mode preserves parsing/validation behavior while avoiding writes
+        # to HubSpot; useful for testing pipelines end-to-end.
         print(f"[DRY RUN] Would submit for {email}: {json.dumps(submission_data)}")
         return
 
@@ -109,6 +122,7 @@ def submit_form(email: str, submission_data: Dict[str, Any], dry_run: bool = Fal
         "Content-Type": "application/json",
     }
 
+    # Endpoint expects v2 form submission payload with a `fields` array.
     resp = requests.post(url, headers=headers, json=submission_data)
 
     if resp.status_code >= 200 and resp.status_code < 300:
@@ -129,18 +143,25 @@ def main():
         print("Error: HUBSPOT_TOKEN environment variable is required.", file=sys.stderr)
         sys.exit(1)
 
-    print("Reading contact events and submitting to HubSpot form...")
+    print("Running signal_finder.py to collect contact events...")
 
     count_total = 0
     count_submitted = 0
 
-    for raw_line in read_lines(args.input):
+    # Per workflow contract, always source fresh events from signal_finder.py.
+    signal_lines = get_signal_finder_output_lines()
+    if not signal_lines:
+        print("null")
+        return
+
+    contact_lines = [line for line in signal_lines if is_contact_event_line(line)]
+    if not contact_lines:
+        print("null")
+        return
+
+    for raw_line in contact_lines:
         raw_line = raw_line.strip()
         if not raw_line:
-            continue
-
-        # Skip log lines from signal_finder.py
-        if not is_contact_event_line(raw_line):
             continue
 
         try:
@@ -156,6 +177,7 @@ def main():
 
         count_total += 1
 
+        # Transform signal event fields into the exact HubSpot form payload schema.
         submission_data = extract_submission_data(event)
         submit_form(email, submission_data, dry_run=args.dry_run)
 
