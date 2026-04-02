@@ -19,7 +19,7 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -71,17 +71,60 @@ def read_input_json(path: Optional[str]) -> Dict[str, Any]:
     raise RuntimeError("--input path is required when reading from a file.")
 
 
-def load_signal_json(path: Optional[str]) -> Dict[str, Any]:
-    """Load optional signal_finder payload containing lead identity fields."""
-    if not path:
-        return {}
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _as_contact_payload(obj: Any) -> Optional[Dict[str, Any]]:
+    """Return object as contact payload when it looks like signal_finder output."""
+    if isinstance(obj, dict) and ("email" in obj or "fullName" in obj):
+        return obj
+    return None
 
 
-def fetch_signal_json() -> Dict[str, Any]:
+def load_signal_contacts(path: Optional[str]) -> List[Dict[str, Any]]:
     """
-    Run signal_finder.py and return the first contact-like JSON object.
+    Load signal contacts from a file path.
+
+    Supports:
+      - Single JSON object
+      - JSON array of objects
+      - NDJSON (one JSON object per line)
+    """
+    if not path:
+        return []
+
+    with open(path, "r", encoding="utf-8") as f:
+        raw = f.read().strip()
+
+    if not raw:
+        return []
+
+    # Try standard JSON first.
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return [item for item in parsed if _as_contact_payload(item)]
+        contact = _as_contact_payload(parsed)
+        return [contact] if contact else []
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback: NDJSON
+    contacts: List[Dict[str, Any]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line.startswith("{") or not line.endswith("}"):
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        contact = _as_contact_payload(obj)
+        if contact:
+            contacts.append(contact)
+    return contacts
+
+
+def fetch_signal_contacts() -> List[Dict[str, Any]]:
+    """
+    Run signal_finder.py and return all contact-like JSON rows.
 
     Expected shape includes keys like: contactId, email, fullName, openCount.
     """
@@ -99,6 +142,7 @@ def fetch_signal_json() -> Dict[str, Any]:
             + (f": {stderr}" if stderr else "")
         ) from exc
 
+    contacts: List[Dict[str, Any]] = []
     for line in (result.stdout or "").splitlines():
         line = line.strip()
         if not line.startswith("{") or not line.endswith("}"):
@@ -107,10 +151,11 @@ def fetch_signal_json() -> Dict[str, Any]:
             payload = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if isinstance(payload, dict) and ("email" in payload or "fullName" in payload):
-            return payload
+        contact = _as_contact_payload(payload)
+        if contact:
+            contacts.append(contact)
 
-    return {}
+    return contacts
 
 
 def require_best_start(payload: Dict[str, Any]) -> str:
@@ -145,31 +190,33 @@ def fetch_best_start_from_availability() -> str:
     return require_best_start(payload)
 
 
-def resolve_customer_identity(args: argparse.Namespace) -> tuple[str, str]:
-    """Resolve customer name/email from CLI args, then signal input/file output."""
-    signal = load_signal_json(args.signal_input) if args.signal_input else {}
+def resolve_customer_identities(args: argparse.Namespace) -> List[Tuple[str, str]]:
+    """Resolve one or more customer (name, email) tuples from CLI and signal inputs."""
+    cli_name = (args.customer_name or "").strip()
+    cli_email = (args.customer_email or "").strip()
 
-    if not signal and (not args.customer_name or not args.customer_email):
-        signal = fetch_signal_json()
+    signal_contacts = load_signal_contacts(args.signal_input) if args.signal_input else []
+    if not signal_contacts and (not cli_name or not cli_email):
+        signal_contacts = fetch_signal_contacts()
 
-    customer_name = (args.customer_name or "").strip()
-    customer_email = (args.customer_email or "").strip()
+    # If both values are explicitly provided, treat as a single-contact run.
+    if cli_name and cli_email:
+        return [(cli_name, cli_email)]
 
-    if not customer_name:
-        customer_name = str(signal.get("fullName") or "").strip()
-    if not customer_email:
-        customer_email = str(signal.get("email") or "").strip()
+    identities: List[Tuple[str, str]] = []
+    for signal in signal_contacts:
+        name = cli_name or str(signal.get("fullName") or "").strip()
+        email = cli_email or str(signal.get("email") or "").strip()
+        if name and email:
+            identities.append((name, email))
 
-    if not customer_name:
+    if not identities:
         raise RuntimeError(
-            'Unable to determine customer name. Pass --customer-name or provide "fullName" in --signal-input JSON.'
-        )
-    if not customer_email:
-        raise RuntimeError(
-            'Unable to determine customer email. Pass --customer-email or provide "email" in --signal-input JSON.'
+            "Unable to determine any customer identities. "
+            'Provide --customer-name/--customer-email, or provide signal data with "fullName" and "email".'
         )
 
-    return customer_name, customer_email
+    return identities
 
 
 def get_access_token() -> str:
@@ -286,40 +333,47 @@ def build_event_body(
 def main() -> None:
     args = parse_args()
     mike_email = load_env("MIKE_ID")
-    customer_name, customer_email = resolve_customer_identity(args)
-
-    if args.input:
-        input_payload = read_input_json(args.input)
-        best_start = require_best_start(input_payload)
-    else:
-        best_start = fetch_best_start_from_availability()
+    customer_identities = resolve_customer_identities(args)
 
     # Authenticate once, then reuse the session-backed client for API calls.
     token = get_access_token()
     client = GraphClient(token)
 
-    event_body = build_event_body(args, best_start, customer_name, customer_email)
+    outputs: List[Dict[str, Any]] = []
+    for customer_name, customer_email in customer_identities:
+        # Fetch fresh availability for each contact when no fixed input was provided.
+        if args.input:
+            input_payload = read_input_json(args.input)
+            best_start = require_best_start(input_payload)
+        else:
+            best_start = fetch_best_start_from_availability()
 
-    if args.dry_run:
-        # Dry run prints the exact payload/target for safe operator verification.
-        print(json.dumps({
-            "dry_run": True,
+        event_body = build_event_body(args, best_start, customer_name, customer_email)
+
+        if args.dry_run:
+            outputs.append({
+                "dry_run": True,
+                "target_calendar_user": mike_email,
+                "customer_name": customer_name,
+                "customer_email": customer_email,
+                "event_payload": event_body,
+            })
+            continue
+
+        # Create the event directly on Mike's calendar.
+        result = client.post(f"/users/{mike_email}/events", event_body)
+        outputs.append({
             "target_calendar_user": mike_email,
-            "event_payload": event_body,
-        }, indent=2))
-        return
+            "customer_name": customer_name,
+            "customer_email": customer_email,
+            "event_id": result.get("id"),
+            "web_link": result.get("webLink"),
+            "subject": result.get("subject"),
+            "start": result.get("start"),
+            "end": result.get("end"),
+        })
 
-    # Create the event directly on Mike's calendar.
-    result = client.post(f"/users/{mike_email}/events", event_body)
-
-    print(json.dumps({
-        "target_calendar_user": mike_email,
-        "event_id": result.get("id"),
-        "web_link": result.get("webLink"),
-        "subject": result.get("subject"),
-        "start": result.get("start"),
-        "end": result.get("end"),
-    }, indent=2))
+    print(json.dumps(outputs, indent=2))
 
 
 if __name__ == "__main__":
