@@ -1,3 +1,9 @@
+"""
+This is the first step in the automation.
+This script should be scheduled to run periodically, probably via cron.
+It scans Open activities in HubSpot and updates opens.jsonl accordingly.
+"""
+
 import os
 import sys
 import json
