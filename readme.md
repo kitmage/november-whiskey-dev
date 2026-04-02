@@ -1,4 +1,4 @@
-[API Ref](https://github.com/HubSpot/hubspot-api-python)
+# Hubspot Setup
 
 ```shell
 pip install --upgrade hubspot-api-client
@@ -20,6 +20,8 @@ try:
 except ApiException as e:
     print("Exception when calling cards_api->create: %s\n" % e)
 ```
+---
+# Env Config
 
 These variables are set in the environment.
 ```shell
