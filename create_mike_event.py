@@ -36,6 +36,7 @@ class GraphError(RuntimeError):
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse event metadata and execution mode flags for Graph event creation."""
     parser = argparse.ArgumentParser(description="Create an Outlook calendar event on Mike's calendar.")
     parser.add_argument("--input", help="Path to JSON file from availability.py. If omitted, reads stdin.")
     parser.add_argument("--customer-name", required=True)
@@ -51,6 +52,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_env(name: str) -> str:
+    """Read a required env var and fail fast with a clear message if missing."""
     value = os.getenv(name)
     if not value:
         raise RuntimeError(f"Missing required env var: {name}")
@@ -58,6 +60,7 @@ def load_env(name: str) -> str:
 
 
 def read_input_json(path: Optional[str]) -> Dict[str, Any]:
+    """Load availability payload from file or stdin to support pipeline usage."""
     if path:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -65,6 +68,11 @@ def read_input_json(path: Optional[str]) -> Dict[str, Any]:
 
 
 def require_best_start(payload: Dict[str, Any]) -> str:
+    """
+    Validate the `availability.py` output contract and extract start datetime.
+
+    Expected shape: {"best_start_time": {"start": "<ISO-8601 datetime>", ...}}
+    """
     best = payload.get("best_start_time")
     if not isinstance(best, dict):
         raise RuntimeError('Input JSON must contain object key "best_start_time".')
@@ -75,6 +83,7 @@ def require_best_start(payload: Dict[str, Any]) -> str:
 
 
 def get_access_token() -> str:
+    """Request an app-only Microsoft Graph token via OAuth2 client credentials."""
     tenant_id = load_env("TENANT_ID")
     client_id = load_env("CLIENT_ID")
     client_secret = load_env("CLIENT_SECRET")
@@ -101,6 +110,7 @@ def get_access_token() -> str:
 
 
 class GraphClient:
+    """Minimal Graph wrapper for authenticated JSON POST calls."""
     def __init__(self, token: str) -> None:
         self.session = requests.Session()
         self.session.headers.update({
@@ -117,12 +127,19 @@ class GraphClient:
 
 
 def make_datetime_pair(start_str: str, duration_minutes: int) -> tuple[str, str]:
+    """Derive `(start, end)` ISO strings from selected start and meeting duration."""
     start_dt = datetime.fromisoformat(start_str)
     end_dt = start_dt + timedelta(minutes=duration_minutes)
     return start_dt.isoformat(), end_dt.isoformat()
 
 
 def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]:
+    """
+    Build a Graph event payload from CLI/customer context.
+
+    Produces a Teams meeting event and includes customer metadata in plain-text
+    body content for quick internal reference.
+    """
     start_iso, end_iso = make_datetime_pair(start_str, args.duration_minutes)
 
     subject = args.subject.strip() or DEFAULT_SUBJECT_TEMPLATE.format(
@@ -178,12 +195,14 @@ def main() -> None:
     input_payload = read_input_json(args.input)
     best_start = require_best_start(input_payload)
 
+    # Authenticate once, then reuse the session-backed client for API calls.
     token = get_access_token()
     client = GraphClient(token)
 
     event_body = build_event_body(args, best_start)
 
     if args.dry_run:
+        # Dry run prints the exact payload/target for safe operator verification.
         print(json.dumps({
             "dry_run": True,
             "target_calendar_user": mike_email,
@@ -191,6 +210,7 @@ def main() -> None:
         }, indent=2))
         return
 
+    # Create the event directly on Mike's calendar.
     result = client.post(f"/users/{mike_email}/events", event_body)
 
     print(json.dumps({
