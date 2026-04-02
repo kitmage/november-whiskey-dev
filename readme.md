@@ -55,6 +55,8 @@ python -m pip install --upgrade pip
 ```bash
 pip install requests msal python-dotenv hubspot-api-client
 ```
+---
+# Env Config
 
 > If you maintain a `requirements.txt` in your environment, you can install from that instead.
 
