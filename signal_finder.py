@@ -1,6 +1,6 @@
 """
-This script scans for an inent signal in HubSpot defined as a number of Opens above a defined threshold.
-Use it as an input to form_submitter.py
+This script scans for an intent signal in HubSpot defined as a number of Opens
+above a defined threshold.
 """
 
 import os
@@ -40,6 +40,7 @@ HEADERS = {
 
 # ---- SHARED UTILS -----------------------------------------------------------
 
+
 def require_env():
     """Validate required environment variables before any network calls are made."""
     missing = []
@@ -50,6 +51,7 @@ def require_env():
     if missing:
         # print(f"Missing required env vars: {', '.join(missing)}", file=sys.stderr)
         sys.exit(1)
+
 
 def hs_get(path, params=None):
     """Thin wrapper for GET with basic error handling."""
@@ -63,7 +65,9 @@ def hs_get(path, params=None):
         resp.raise_for_status()
     return resp.json()
 
+
 # ---- PART 1: EMAIL OPEN COUNTS ----------------------------------------------
+
 
 def get_marketing_email_ids_for_campaign(campaign_guid):
     """
@@ -114,6 +118,7 @@ def get_marketing_email_ids_for_campaign(campaign_guid):
 
     return email_ids
 
+
 def get_email_campaign_ids_for_email(email_id):
     """
     Uses Marketing Emails v3:
@@ -141,6 +146,7 @@ def get_email_campaign_ids_for_email(email_id):
             pass
 
     return sorted(email_campaign_ids)
+
 
 def get_open_events_for_email_campaign(email_campaign_id, app_id=HUBSPOT_APP_ID):
     """
@@ -174,6 +180,7 @@ def get_open_events_for_email_campaign(email_campaign_id, app_id=HUBSPOT_APP_ID)
             break
 
     return events
+
 
 def get_open_counts_for_campaign(campaign_id):
     """
@@ -235,7 +242,9 @@ def get_open_counts_for_campaign(campaign_id):
 
     return open_counts
 
+
 # ---- PART 2: LIST CONTACTS + PCI FLAG ---------------------------------------
+
 
 def get_list_contacts(list_id, properties=None):
     """
@@ -293,6 +302,7 @@ def get_list_contacts(list_id, properties=None):
 
     return contacts
 
+
 def get_contacts_by_pci_flag(list_id, property_name):
     """
     Partition list contacts by the PCI eligibility flag.
@@ -300,7 +310,10 @@ def get_contacts_by_pci_flag(list_id, property_name):
     Contacts with `{property_name} == "true"` are considered PCI-ineligible and
     are separated from the set we can act on in downstream automation.
     """
-    contacts = get_list_contacts(list_id, properties=[property_name, "email"])
+    contacts = get_list_contacts(
+        list_id,
+        properties=[property_name, "email", "firstname", "lastname"],
+    )
     pci_eligible = []
     pci_ineligible = []
 
@@ -316,7 +329,9 @@ def get_contacts_by_pci_flag(list_id, property_name):
 
     return pci_eligible, pci_ineligible
 
+
 # ---- MAIN: JOIN EMAIL OPENS WITH LIST CONTACTS ------------------------------
+
 
 def main():
     require_env()
@@ -339,14 +354,21 @@ def main():
         email = (props.get("email") or "").strip().lower()
         if not email:
             continue
+
+        firstname = (props.get("firstname") or "").strip()
+        lastname = (props.get("lastname") or "").strip()
+        full_name = (firstname + " " + lastname).strip() or None
+
         eligible_by_email[email] = {
             "id": c.get("id"),
             "email": email,
+            "fullName": full_name,
             "do_not_send_pci": False,  # by definition of pci_eligible
         }
 
     # 3) Aggregate above-threshold opens per contact
-    aggregated_by_contact = {}  # key: contactId, value: {"contactId", "email", "openCount"}
+    # key: contactId, value: {"contactId", "email", "fullName", "openCount"}
+    aggregated_by_contact = {}
 
     for (email_id, ecid, recipient), count in sorted(open_counts.items()):
         # Apply signal threshold: skip if below threshold
@@ -364,6 +386,7 @@ def main():
             aggregated_by_contact[contact_id] = {
                 "contactId": contact_id,
                 "email": contact["email"],
+                "fullName": contact.get("fullName"),
                 "openCount": 0,
             }
 
@@ -374,6 +397,7 @@ def main():
     #    This format is easy to stream into queue/workflow processors.
     for contact_summary in aggregated_by_contact.values():
         print(json.dumps(contact_summary))
+
 
 if __name__ == "__main__":
     if not HUBSPOT_TOKEN:
