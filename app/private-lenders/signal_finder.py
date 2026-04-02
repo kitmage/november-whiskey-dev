@@ -6,10 +6,13 @@ above a defined threshold.
 import os
 import sys
 import json
-import time
+import logging
+import argparse
 from datetime import datetime, timedelta, timezone
 
 import requests
+
+LOGGER = logging.getLogger(__name__)
 
 # ---- ENV / CONSTANTS --------------------------------------------------------
 
@@ -87,6 +90,7 @@ def get_marketing_email_ids_for_campaign(campaign_guid):
             f"/marketing/v3/campaigns/{campaign_guid}/assets/MARKETING_EMAIL",
             params=params,
         )
+        LOGGER.debug("Fetched campaign assets page (after=%s): keys=%s", after, list(data.keys()))
 
         # API shape can be either:
         # 1) { "results": [ { "id": "832", ... }, ... ] }
@@ -128,6 +132,7 @@ def get_email_campaign_ids_for_email(email_id):
       list[int] of legacy emailCampaignIds for that email.
     """
     data = hs_get(f"/marketing/v3/emails/{email_id}")
+    LOGGER.debug("Fetched email metadata for email_id=%s", email_id)
     email_campaign_ids = set()
 
     # allEmailCampaignIds is usually an array of strings
@@ -170,6 +175,12 @@ def get_open_events_for_email_campaign(email_campaign_id, app_id=HUBSPOT_APP_ID)
 
         data = hs_get("/email/public/v1/events", params=params)
         batch = data.get("events", [])
+        LOGGER.debug(
+            "Fetched OPEN events page for emailCampaignId=%s (offset=%s): %d events",
+            email_campaign_id,
+            offset,
+            len(batch),
+        )
         events.extend(batch)
 
         if not data.get("hasMore"):
@@ -203,6 +214,7 @@ def get_open_counts_for_campaign(campaign_id):
     if not email_ids:
         # print("No MARKETING_EMAIL assets found for this campaign.", file=sys.stderr)
         return {}
+    LOGGER.debug("Resolved %d marketing email IDs for campaign %s", len(email_ids), campaign_id)
 
     # print(f"Found {len(email_ids)} marketing emails.", file=sys.stderr)
 
@@ -216,6 +228,7 @@ def get_open_counts_for_campaign(campaign_id):
             #     file=sys.stderr,
             # )
             continue
+        LOGGER.debug("email_id=%s has %d legacy campaign IDs", email_id, len(email_campaign_ids))
 
         for ecid in email_campaign_ids:
             # print(
@@ -225,6 +238,7 @@ def get_open_counts_for_campaign(campaign_id):
             # )
             open_events = get_open_events_for_email_campaign(ecid, HUBSPOT_APP_ID)
             if not open_events:
+                LOGGER.debug("No OPEN events for email_id=%s emailCampaignId=%s", email_id, ecid)
                 continue
 
             for ev in open_events:
@@ -240,6 +254,7 @@ def get_open_counts_for_campaign(campaign_id):
                 key = (str(email_id), int(ecid), recipient)
                 open_counts[key] = open_counts.get(key, 0) + 1
 
+    LOGGER.debug("Built %d (emailId, emailCampaignId, recipient) open-count buckets", len(open_counts))
     return open_counts
 
 
@@ -264,6 +279,7 @@ def get_list_contacts(list_id, properties=None):
         resp = requests.get(endpoint, headers=HEADERS, params=params)
         resp.raise_for_status()
         data = resp.json()
+        LOGGER.debug("Fetched list memberships page (after=%s): %d rows", after, len(data.get("results", [])))
 
         results = data.get("results", [])
         if not results:
@@ -282,6 +298,7 @@ def get_list_contacts(list_id, properties=None):
             break
 
     if not contact_ids:
+        LOGGER.debug("No contacts found in list_id=%s", list_id)
         return []
 
     # 2) Batch read contacts to get properties
@@ -298,8 +315,10 @@ def get_list_contacts(list_id, properties=None):
         resp = requests.post(batch_endpoint, headers=HEADERS, json=payload)
         resp.raise_for_status()
         data = resp.json()
+        LOGGER.debug("Fetched contact batch [%d:%d): %d records", i, i + len(batch_ids), len(data.get("results", [])))
         contacts.extend(data.get("results", []))
 
+    LOGGER.debug("Loaded %d contacts from list_id=%s", len(contacts), list_id)
     return contacts
 
 
@@ -327,19 +346,48 @@ def get_contacts_by_pci_flag(list_id, property_name):
         else:
             pci_eligible.append(contact)
 
+    LOGGER.debug(
+        "Partitioned contacts by %s: eligible=%d ineligible=%d",
+        property_name,
+        len(pci_eligible),
+        len(pci_ineligible),
+    )
     return pci_eligible, pci_ineligible
 
 
 # ---- MAIN: JOIN EMAIL OPENS WITH LIST CONTACTS ------------------------------
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Find contacts with above-threshold HubSpot email opens."
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug logging to stderr.",
+    )
+    return parser.parse_args()
+
+
+def configure_logging(debug=False):
+    level = logging.DEBUG if debug else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+
+
 def main():
+    args = parse_args()
+    configure_logging(args.debug)
     require_env()
 
     # 1) Get open counts for this campaign (filtered by LOOKBACK_TS)
     # This returns per-(email asset, campaign id, recipient) open totals so we
     # can apply a signal threshold before acting on any contact.
     open_counts = get_open_counts_for_campaign(CAMPAIGN_ID)
+    LOGGER.debug("open_counts bucket count=%d", len(open_counts))
 
     # 2) Get contacts in the list with PCI flag + email
     pci_eligible, pci_ineligible = get_contacts_by_pci_flag(LIST_ID, PROPERTY_NAME)
@@ -368,6 +416,7 @@ def main():
             "fullName": full_name,
             "do_not_send_pci": False,  # by definition of pci_eligible
         }
+    LOGGER.debug("Built eligible_by_email lookup with %d entries", len(eligible_by_email))
 
     # 3) Aggregate above-threshold opens per contact
     # key: contactId, value: {"contactId", "email", "fullName", "openCount"}
@@ -389,7 +438,7 @@ def main():
             aggregated_by_contact[contact_id] = {
                 "contactId": contact_id,
                 "email": contact["email"],
-                "fullName": contact.get("fullName"),
+                "fullName": contact.get("fullName") or contact["email"],
                 "openCount": 0,
             }
 
@@ -399,6 +448,7 @@ def main():
     # 4) Emit NDJSON (one JSON object per line) for downstream automation steps.
     #    This format is easy to stream into queue/workflow processors.
     for contact_summary in aggregated_by_contact.values():
+        LOGGER.debug("Emitting contact summary: %s", contact_summary)
         print(json.dumps(contact_summary))
 
 
