@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -33,6 +34,9 @@ DEFAULT_DURATION_MINUTES = 30
 DEFAULT_INTER_EVENT_DELAY_SECONDS = 1.0
 DEFAULT_SUBJECT_TEMPLATE = "30min Meeting - {customer_name}"
 DEFAULT_DEBUG_LOG_PATH = "create_mike_event.log"
+SCRIPT_DIR = Path(__file__).resolve().parent
+SIGNAL_FINDER_PATH = SCRIPT_DIR / "signal_finder.py"
+AVAILABILITY_PATH = SCRIPT_DIR / "availability.py"
 
 LOGGER = logging.getLogger("create_mike_event")
 
@@ -155,10 +159,11 @@ def fetch_signal_contacts() -> List[Dict[str, Any]]:
     try:
         LOGGER.debug("Running signal_finder.py for contact resolution.")
         result = subprocess.run(
-            [sys.executable, "signal_finder.py"],
+            [sys.executable, str(SIGNAL_FINDER_PATH)],
             check=True,
             capture_output=True,
             text=True,
+            cwd=str(SCRIPT_DIR),
         )
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
@@ -203,10 +208,11 @@ def fetch_best_start_from_availability() -> str:
     """Run availability.py and extract the selected start time from its JSON output."""
     LOGGER.debug("Running availability.py to fetch best_start_time.")
     result = subprocess.run(
-        [sys.executable, "availability.py"],
+        [sys.executable, str(AVAILABILITY_PATH)],
         check=True,
         capture_output=True,
         text=True,
+        cwd=str(SCRIPT_DIR),
     )
 
     try:
