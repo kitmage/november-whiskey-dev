@@ -16,6 +16,7 @@ BASE_URL = "https://api.hubapi.com"
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse CLI flags for input source selection and safe dry-run execution."""
     parser = argparse.ArgumentParser(
         description="Submit contacts (from signal_finder.py JSON lines) to a HubSpot form."
     )
@@ -54,7 +55,8 @@ def is_contact_event_line(line: str) -> bool:
     except json.JSONDecodeError:
         return False
 
-    # Expect at minimum these keys from your example
+    # Minimal contract from signal_finder output:
+    # {"contactId": "...", "email": "...", "openCount": N}
     return "email" in obj and "contactId" in obj
 
 
@@ -65,7 +67,8 @@ def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
     Adjust 'fields' list if your HubSpot form has more fields you want to populate.
     """
     email = event.get("email")
-    # You can also send openCount, emailId, etc. as hidden fields if your form has them.
+    # Only `email` is required for this workflow. Additional values are forwarded
+    # when present so the form can capture engagement context for routing/scoring.
     open_count = event.get("openCount")
     email_id = event.get("emailId")
     email_campaign_id = event.get("emailCampaignId")
@@ -74,7 +77,7 @@ def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
         {"name": "email", "value": email},
     ]
 
-    # Optional hidden fields (only if these exist as form fields)
+    # Optional hidden fields (only if corresponding fields exist on the form).
     if open_count is not None:
         fields.append({"name": "open_count", "value": str(open_count)})
     if email_id is not None:
@@ -97,6 +100,8 @@ def submit_form(email: str, submission_data: Dict[str, Any], dry_run: bool = Fal
     """
 
     if dry_run:
+        # Dry-run mode preserves parsing/validation behavior while avoiding writes
+        # to HubSpot; useful for testing pipelines end-to-end.
         print(f"[DRY RUN] Would submit for {email}: {json.dumps(submission_data)}")
         return
 
@@ -109,6 +114,7 @@ def submit_form(email: str, submission_data: Dict[str, Any], dry_run: bool = Fal
         "Content-Type": "application/json",
     }
 
+    # Endpoint expects v2 form submission payload with a `fields` array.
     resp = requests.post(url, headers=headers, json=submission_data)
 
     if resp.status_code >= 200 and resp.status_code < 300:
@@ -134,12 +140,13 @@ def main():
     count_total = 0
     count_submitted = 0
 
+    # The reader may consume either stdin piping or a newline-delimited file.
     for raw_line in read_lines(args.input):
         raw_line = raw_line.strip()
         if not raw_line:
             continue
 
-        # Skip log lines from signal_finder.py
+        # signal_finder output can include non-JSON logs; guard before parse.
         if not is_contact_event_line(raw_line):
             continue
 
@@ -156,6 +163,7 @@ def main():
 
         count_total += 1
 
+        # Transform signal event fields into the exact HubSpot form payload schema.
         submission_data = extract_submission_data(event)
         submit_form(email, submission_data, dry_run=args.dry_run)
 
