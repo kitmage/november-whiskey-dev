@@ -7,8 +7,7 @@ directly on Mike's Outlook calendar.
 
 Example:
   python3 create_mike_event.py \
-    --customer-name "Prospect Name" \
-    --customer-email "prospect@example.com" \
+    --signal-input signal.json \
     --dry-run
 """
 
@@ -43,8 +42,9 @@ def parse_args() -> argparse.Namespace:
         "--input",
         help="Optional path to JSON file from availability.py. If omitted, availability.py is executed.",
     )
-    parser.add_argument("--customer-name", required=True)
-    parser.add_argument("--customer-email", required=True)
+    parser.add_argument("--signal-input", help="Optional path to JSON output from signal_finder.py.")
+    parser.add_argument("--customer-name", default="")
+    parser.add_argument("--customer-email", default="")
     parser.add_argument("--customer-phone", default="")
     parser.add_argument("--customer-notes", default="")
     parser.add_argument("--subject", default="")
@@ -69,6 +69,14 @@ def read_input_json(path: Optional[str]) -> Dict[str, Any]:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     raise RuntimeError("--input path is required when reading from a file.")
+
+
+def load_signal_json(path: Optional[str]) -> Dict[str, Any]:
+    """Load optional signal_finder payload containing lead identity fields."""
+    if not path:
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def require_best_start(payload: Dict[str, Any]) -> str:
@@ -101,6 +109,30 @@ def fetch_best_start_from_availability() -> str:
         raise RuntimeError(f"availability.py produced invalid JSON output: {exc}") from exc
 
     return require_best_start(payload)
+
+
+def resolve_customer_identity(args: argparse.Namespace) -> tuple[str, str]:
+    """Resolve customer name/email from CLI args first, then signal_finder output."""
+    signal = load_signal_json(args.signal_input)
+
+    customer_name = (args.customer_name or "").strip()
+    customer_email = (args.customer_email or "").strip()
+
+    if not customer_name:
+        customer_name = str(signal.get("fullName") or "").strip()
+    if not customer_email:
+        customer_email = str(signal.get("email") or "").strip()
+
+    if not customer_name:
+        raise RuntimeError(
+            'Unable to determine customer name. Pass --customer-name or provide "fullName" in --signal-input JSON.'
+        )
+    if not customer_email:
+        raise RuntimeError(
+            'Unable to determine customer email. Pass --customer-email or provide "email" in --signal-input JSON.'
+        )
+
+    return customer_name, customer_email
 
 
 def get_access_token() -> str:
@@ -154,7 +186,12 @@ def make_datetime_pair(start_str: str, duration_minutes: int) -> tuple[str, str]
     return start_dt.isoformat(), end_dt.isoformat()
 
 
-def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]:
+def build_event_body(
+    args: argparse.Namespace,
+    start_str: str,
+    customer_name: str,
+    customer_email: str,
+) -> Dict[str, Any]:
     """
     Build a Graph event payload from CLI/customer context.
 
@@ -164,12 +201,12 @@ def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]
     start_iso, end_iso = make_datetime_pair(start_str, args.duration_minutes)
 
     subject = args.subject.strip() or DEFAULT_SUBJECT_TEMPLATE.format(
-        customer_name=args.customer_name
+        customer_name=customer_name
     )
 
     lines = [
-        f"Customer: {args.customer_name}",
-        f"Email: {args.customer_email}",
+        f"Customer: {customer_name}",
+        f"Email: {customer_email}",
     ]
     if args.customer_phone:
         lines.append(f"Phone: {args.customer_phone}")
@@ -198,8 +235,8 @@ def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]
         "attendees": [
             {
                 "emailAddress": {
-                    "address": args.customer_email,
-                    "name": args.customer_name,
+                    "address": customer_email,
+                    "name": customer_name,
                 },
                 "type": "required",
             }
@@ -212,6 +249,7 @@ def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]
 def main() -> None:
     args = parse_args()
     mike_email = load_env("MIKE_ID")
+    customer_name, customer_email = resolve_customer_identity(args)
 
     if args.input:
         input_payload = read_input_json(args.input)
@@ -223,7 +261,7 @@ def main() -> None:
     token = get_access_token()
     client = GraphClient(token)
 
-    event_body = build_event_body(args, best_start)
+    event_body = build_event_body(args, best_start, customer_name, customer_email)
 
     if args.dry_run:
         # Dry run prints the exact payload/target for safe operator verification.
