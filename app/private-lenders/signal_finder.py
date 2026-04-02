@@ -357,7 +357,10 @@ def main():
 
         firstname = (props.get("firstname") or "").strip()
         lastname = (props.get("lastname") or "").strip()
-        full_name = (firstname + " " + lastname).strip() or None
+        # Avoid emitting null for fullName, since downstream consumers treat it
+        # as a display-ready string. Fall back to the contact email when name
+        # properties are absent.
+        full_name = (firstname + " " + lastname).strip() or email
 
         eligible_by_email[email] = {
             "id": c.get("id"),
