@@ -1,3 +1,8 @@
+"""
+This script should be triggered periodically via cron or similar process.
+It takes input from signal_finder.py and may submit a Hubspot form.
+"""
+
 #!/usr/bin/env python3
 import os
 import sys
