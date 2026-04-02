@@ -15,6 +15,8 @@ load_dotenv()
 TENANT_ID = os.environ["TENANT_ID"]
 CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
+ROB_ID = os.environ["ROB_ID"]
+TOM_ID = os.environ["TOM_ID"]
 
 # =========================
 # Microsoft Graph settings
@@ -29,8 +31,8 @@ GRAPH_TIMEZONE = "Central Standard Time"  # Windows timezone name for Graph
 # =========================
 LOCAL_TZ = ZoneInfo("America/Chicago")
 
-USER_1 = "SalesMarketing@nwmriskmanagement.com"
-USER_2 = "tom@nwmriskmanagement.com"
+USER_1 = TOM_ID
+USER_2 = ROB_ID
 
 BOOKING_WINDOW_START_HOURS = 24
 BOOKING_WINDOW_END_HOURS = 360
