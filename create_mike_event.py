@@ -2,13 +2,12 @@
 """
 create_mike_event.py
 
-Reads best_start_time JSON from availability.py and creates a calendar event
+Fetches best_start_time from availability.py and creates a calendar event
 directly on Mike's Outlook calendar.
 
 Example:
-  python3 availability.py | python3 create_mike_event.py \
-    --customer-name "Prospect Name" \
-    --customer-email "prospect@example.com" \
+  python3 create_mike_event.py \
+    --signal-input signal.json \
     --dry-run
 """
 
@@ -17,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -38,9 +38,13 @@ class GraphError(RuntimeError):
 def parse_args() -> argparse.Namespace:
     """Parse event metadata and execution mode flags for Graph event creation."""
     parser = argparse.ArgumentParser(description="Create an Outlook calendar event on Mike's calendar.")
-    parser.add_argument("--input", help="Path to JSON file from availability.py. If omitted, reads stdin.")
-    parser.add_argument("--customer-name", required=True)
-    parser.add_argument("--customer-email", required=True)
+    parser.add_argument(
+        "--input",
+        help="Optional path to JSON file from availability.py. If omitted, availability.py is executed.",
+    )
+    parser.add_argument("--signal-input", help="Optional path to JSON output from signal_finder.py.")
+    parser.add_argument("--customer-name", default="")
+    parser.add_argument("--customer-email", default="")
     parser.add_argument("--customer-phone", default="")
     parser.add_argument("--customer-notes", default="")
     parser.add_argument("--subject", default="")
@@ -60,11 +64,19 @@ def load_env(name: str) -> str:
 
 
 def read_input_json(path: Optional[str]) -> Dict[str, Any]:
-    """Load availability payload from file or stdin to support pipeline usage."""
+    """Load availability payload from file."""
     if path:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-    return json.load(sys.stdin)
+    raise RuntimeError("--input path is required when reading from a file.")
+
+
+def load_signal_json(path: Optional[str]) -> Dict[str, Any]:
+    """Load optional signal_finder payload containing lead identity fields."""
+    if not path:
+        return {}
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def require_best_start(payload: Dict[str, Any]) -> str:
@@ -80,6 +92,47 @@ def require_best_start(payload: Dict[str, Any]) -> str:
     if not isinstance(start, str) or not start:
         raise RuntimeError('"best_start_time.start" is missing or invalid.')
     return start
+
+
+def fetch_best_start_from_availability() -> str:
+    """Run availability.py and extract the selected start time from its JSON output."""
+    result = subprocess.run(
+        [sys.executable, "availability.py"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"availability.py produced invalid JSON output: {exc}") from exc
+
+    return require_best_start(payload)
+
+
+def resolve_customer_identity(args: argparse.Namespace) -> tuple[str, str]:
+    """Resolve customer name/email from CLI args first, then signal_finder output."""
+    signal = load_signal_json(args.signal_input)
+
+    customer_name = (args.customer_name or "").strip()
+    customer_email = (args.customer_email or "").strip()
+
+    if not customer_name:
+        customer_name = str(signal.get("fullName") or "").strip()
+    if not customer_email:
+        customer_email = str(signal.get("email") or "").strip()
+
+    if not customer_name:
+        raise RuntimeError(
+            'Unable to determine customer name. Pass --customer-name or provide "fullName" in --signal-input JSON.'
+        )
+    if not customer_email:
+        raise RuntimeError(
+            'Unable to determine customer email. Pass --customer-email or provide "email" in --signal-input JSON.'
+        )
+
+    return customer_name, customer_email
 
 
 def get_access_token() -> str:
@@ -133,7 +186,12 @@ def make_datetime_pair(start_str: str, duration_minutes: int) -> tuple[str, str]
     return start_dt.isoformat(), end_dt.isoformat()
 
 
-def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]:
+def build_event_body(
+    args: argparse.Namespace,
+    start_str: str,
+    customer_name: str,
+    customer_email: str,
+) -> Dict[str, Any]:
     """
     Build a Graph event payload from CLI/customer context.
 
@@ -143,12 +201,12 @@ def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]
     start_iso, end_iso = make_datetime_pair(start_str, args.duration_minutes)
 
     subject = args.subject.strip() or DEFAULT_SUBJECT_TEMPLATE.format(
-        customer_name=args.customer_name
+        customer_name=customer_name
     )
 
     lines = [
-        f"Customer: {args.customer_name}",
-        f"Email: {args.customer_email}",
+        f"Customer: {customer_name}",
+        f"Email: {customer_email}",
     ]
     if args.customer_phone:
         lines.append(f"Phone: {args.customer_phone}")
@@ -177,8 +235,8 @@ def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]
         "attendees": [
             {
                 "emailAddress": {
-                    "address": args.customer_email,
-                    "name": args.customer_name,
+                    "address": customer_email,
+                    "name": customer_name,
                 },
                 "type": "required",
             }
@@ -191,15 +249,19 @@ def build_event_body(args: argparse.Namespace, start_str: str) -> Dict[str, Any]
 def main() -> None:
     args = parse_args()
     mike_email = load_env("MIKE_ID")
+    customer_name, customer_email = resolve_customer_identity(args)
 
-    input_payload = read_input_json(args.input)
-    best_start = require_best_start(input_payload)
+    if args.input:
+        input_payload = read_input_json(args.input)
+        best_start = require_best_start(input_payload)
+    else:
+        best_start = fetch_best_start_from_availability()
 
     # Authenticate once, then reuse the session-backed client for API calls.
     token = get_access_token()
     client = GraphClient(token)
 
-    event_body = build_event_body(args, best_start)
+    event_body = build_event_body(args, best_start, customer_name, customer_email)
 
     if args.dry_run:
         # Dry run prints the exact payload/target for safe operator verification.
