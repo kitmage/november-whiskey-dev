@@ -27,7 +27,7 @@ BASE_URL = "https://api.hubapi.com"
 LOOKBACK_WINDOW_HOURS = 360
 
 # Signal threshold for minimum number of opens
-SIGNAL_THRESHOLD = 3
+SIGNAL_THRESHOLD = 30
 
 # Compute "now minus LOOKBACK_WINDOW_HOURS" in Unix milliseconds (UTC)
 NOW_UTC = datetime.now(timezone.utc)
