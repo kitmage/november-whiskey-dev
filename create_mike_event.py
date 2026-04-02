@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -31,6 +32,9 @@ DEFAULT_TIMEZONE = "Pacific Standard Time"
 DEFAULT_DURATION_MINUTES = 30
 DEFAULT_INTER_EVENT_DELAY_SECONDS = 1.0
 DEFAULT_SUBJECT_TEMPLATE = "30min Meeting - {customer_name}"
+DEFAULT_DEBUG_LOG_PATH = "create_mike_event.log"
+
+LOGGER = logging.getLogger("create_mike_event")
 
 
 class GraphError(RuntimeError):
@@ -54,8 +58,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
     parser.add_argument("--duration-minutes", type=int, default=DEFAULT_DURATION_MINUTES)
     parser.add_argument("--inter-event-delay-seconds", type=float, default=DEFAULT_INTER_EVENT_DELAY_SECONDS)
+    parser.add_argument("--debug", action="store_true", help="Enable persistent debug logging to a local log file.")
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
+
+
+def configure_logging(debug: bool, log_path: str = DEFAULT_DEBUG_LOG_PATH) -> None:
+    """Configure persistent file logging when debug mode is enabled."""
+    LOGGER.handlers.clear()
+    LOGGER.propagate = False
+
+    if not debug:
+        LOGGER.setLevel(logging.CRITICAL)
+        return
+
+    LOGGER.setLevel(logging.DEBUG)
+    handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    LOGGER.addHandler(handler)
+    LOGGER.debug("Debug logging enabled.")
 
 
 def load_env(name: str) -> str:
@@ -132,6 +153,7 @@ def fetch_signal_contacts() -> List[Dict[str, Any]]:
     Expected shape includes keys like: contactId, email, fullName, openCount.
     """
     try:
+        LOGGER.debug("Running signal_finder.py for contact resolution.")
         result = subprocess.run(
             [sys.executable, "signal_finder.py"],
             check=True,
@@ -158,6 +180,7 @@ def fetch_signal_contacts() -> List[Dict[str, Any]]:
         if contact:
             contacts.append(contact)
 
+    LOGGER.debug("Resolved %d contacts from signal_finder.py output.", len(contacts))
     return contacts
 
 
@@ -178,6 +201,7 @@ def require_best_start(payload: Dict[str, Any]) -> str:
 
 def fetch_best_start_from_availability() -> str:
     """Run availability.py and extract the selected start time from its JSON output."""
+    LOGGER.debug("Running availability.py to fetch best_start_time.")
     result = subprocess.run(
         [sys.executable, "availability.py"],
         check=True,
@@ -217,6 +241,7 @@ def resolve_customer_identities(args: argparse.Namespace) -> List[Tuple[str, str
         if name and email:
             identities.append((name, email))
 
+    LOGGER.debug("Resolved %d customer identities.", len(identities))
     return identities
 
 
@@ -340,13 +365,17 @@ def send_contact_to_form_submitter(customer_name: str, customer_email: str, dry_
         "fullName": customer_name,
     }
     submission_data = extract_submission_data(signal_event)
+    LOGGER.debug("Submitting contact to form_submitter for email=%s dry_run=%s", customer_email, dry_run)
     return submit_form(customer_email, submission_data, dry_run=dry_run)
 
 
 def main() -> None:
     args = parse_args()
+    configure_logging(args.debug)
+    LOGGER.debug("Starting create_mike_event.py with dry_run=%s", args.dry_run)
     customer_identities = resolve_customer_identities(args)
     if not customer_identities:
+        LOGGER.debug("No qualifying contacts resolved. Exiting gracefully with null.")
         print("null")
         return
     mike_email = load_env("MIKE_ID")
@@ -357,6 +386,7 @@ def main() -> None:
 
     outputs: List[Dict[str, Any]] = []
     for i, (customer_name, customer_email) in enumerate(customer_identities):
+        LOGGER.debug("Processing contact %d/%d: %s <%s>", i + 1, len(customer_identities), customer_name, customer_email)
         # Fetch fresh availability for each contact when no fixed input was provided.
         if args.input:
             input_payload = read_input_json(args.input)
@@ -377,11 +407,13 @@ def main() -> None:
         else:
             # Create the event directly on Mike's calendar.
             result = client.post(f"/users/{mike_email}/events", event_body)
+            LOGGER.debug("Created event id=%s for email=%s", result.get("id"), customer_email)
             form_submitted = send_contact_to_form_submitter(
                 customer_name=customer_name,
                 customer_email=customer_email,
                 dry_run=args.dry_run,
             )
+            LOGGER.debug("Form submission result for email=%s submitted=%s", customer_email, form_submitted)
             outputs.append({
                 "target_calendar_user": mike_email,
                 "customer_name": customer_name,
@@ -396,8 +428,10 @@ def main() -> None:
 
         # Keep a small gap between event creations to be friendlier to upstream APIs.
         if i < len(customer_identities) - 1 and args.inter_event_delay_seconds > 0:
+            LOGGER.debug("Sleeping %.2f seconds before next contact.", args.inter_event_delay_seconds)
             time.sleep(args.inter_event_delay_seconds)
 
+    LOGGER.debug("Completed run with %d output records.", len(outputs))
     print(json.dumps(outputs, indent=2))
 
 
