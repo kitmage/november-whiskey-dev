@@ -17,8 +17,7 @@ CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 ROB_ID = os.environ["ROB_ID"]
 TOM_ID = os.environ["TOM_ID"]
-MIKE_ID = os.environ["MIKE_ID"]
-# Add more env vars as needed, e.g.:
+# Add more as needed:
 # JANE_ID = os.environ["JANE_ID"]
 # SUE_ID = os.environ["SUE_ID"]
 
@@ -39,16 +38,20 @@ LOCAL_TZ = ZoneInfo("America/Chicago")
 USERS = [
     TOM_ID,
     ROB_ID,
-    MIKE_ID,
     # JANE_ID,
     # SUE_ID,
 ]
 
-BOOKING_WINDOW_START_HOURS = 36
-BOOKING_WINDOW_END_HOURS = 240
+BOOKING_WINDOW_START_HOURS = 24
+BOOKING_WINDOW_END_HOURS = 360
 
-BUSINESS_DAY_START_HOUR = 10   # 10 AM
-BUSINESS_DAY_END_HOUR = 16    # 4 PM
+BUSINESS_DAY_START_HOUR = 9   # 9:00 AM
+BUSINESS_DAY_END_HOUR = 16    # 4:00 PM
+
+LUNCH_BREAK_START_HOUR = 11
+LUNCH_BREAK_START_MINUTE = 30
+LUNCH_BREAK_END_HOUR = 13
+LUNCH_BREAK_END_MINUTE = 0
 
 INTERVAL_MINUTES = 30
 
@@ -208,6 +211,10 @@ def filter_to_business_hours(
     start_hour: int,
     end_hour: int,
     interval_minutes: int,
+    lunch_start_hour: int,
+    lunch_start_minute: int,
+    lunch_end_hour: int,
+    lunch_end_minute: int,
 ) -> list[tuple[datetime, datetime]]:
     filtered: list[tuple[datetime, datetime]] = []
 
@@ -220,7 +227,22 @@ def filter_to_business_hours(
             is_weekday = current.weekday() < 5
             is_in_business_hours = start_hour <= current.hour < end_hour
 
-            if is_weekday and is_in_business_hours:
+            lunch_start = current.replace(
+                hour=lunch_start_hour,
+                minute=lunch_start_minute,
+                second=0,
+                microsecond=0,
+            )
+            lunch_end = current.replace(
+                hour=lunch_end_hour,
+                minute=lunch_end_minute,
+                second=0,
+                microsecond=0,
+            )
+
+            overlaps_lunch = current < lunch_end and next_slot > lunch_start
+
+            if is_weekday and is_in_business_hours and not overlaps_lunch:
                 filtered.append((current, next_slot))
 
             current = next_slot
@@ -259,6 +281,10 @@ def to_json_output(
             "booking_window_end_hours": BOOKING_WINDOW_END_HOURS,
             "business_day_start_hour": BUSINESS_DAY_START_HOUR,
             "business_day_end_hour": BUSINESS_DAY_END_HOUR,
+            "lunch_break_start_hour": LUNCH_BREAK_START_HOUR,
+            "lunch_break_start_minute": LUNCH_BREAK_START_MINUTE,
+            "lunch_break_end_hour": LUNCH_BREAK_END_HOUR,
+            "lunch_break_end_minute": LUNCH_BREAK_END_MINUTE,
             "interval_minutes": INTERVAL_MINUTES,
             "search_window_start": search_start.isoformat(),
             "search_window_end": search_end.isoformat(),
@@ -279,8 +305,7 @@ def main():
     search_start, search_end = build_search_window()
     token = get_access_token()
 
-    # Graph requires the endpoint to be called from some user context;
-    # using the first user as anchor is fine.
+    # Use first user as Graph anchor for the getSchedule endpoint
     anchor_user = USERS[0]
 
     graph_response = call_get_schedule(
@@ -303,6 +328,10 @@ def main():
         start_hour=BUSINESS_DAY_START_HOUR,
         end_hour=BUSINESS_DAY_END_HOUR,
         interval_minutes=INTERVAL_MINUTES,
+        lunch_start_hour=LUNCH_BREAK_START_HOUR,
+        lunch_start_minute=LUNCH_BREAK_START_MINUTE,
+        lunch_end_hour=LUNCH_BREAK_END_HOUR,
+        lunch_end_minute=LUNCH_BREAK_END_MINUTE,
     )
 
     output = to_json_output(
