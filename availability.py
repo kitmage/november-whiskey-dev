@@ -25,12 +25,12 @@ MIKE_ID = os.environ["MIKE_ID"]
 AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 SCOPES = ["https://graph.microsoft.com/.default"]
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
-GRAPH_TIMEZONE = "Central Standard Time"
+GRAPH_TIMEZONE = "Pacific Standard Time"
 
 # =========================
 # Local/business settings
 # =========================
-LOCAL_TZ = ZoneInfo("America/Chicago")
+LOCAL_TZ = ZoneInfo("America/Los_Angeles")
 
 USERS = [
     TOM_ID,
