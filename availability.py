@@ -17,6 +17,7 @@ CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 ROB_ID = os.environ["ROB_ID"]
 TOM_ID = os.environ["TOM_ID"]
+MIKE_ID = os.environ["MIKE_ID"]
 # Add more as needed:
 # JANE_ID = os.environ["JANE_ID"]
 # SUE_ID = os.environ["SUE_ID"]
@@ -38,12 +39,13 @@ LOCAL_TZ = ZoneInfo("America/Chicago")
 USERS = [
     TOM_ID,
     ROB_ID,
+    MIKE_ID,
     # JANE_ID,
     # SUE_ID,
 ]
 
-BOOKING_WINDOW_START_HOURS = 24
-BOOKING_WINDOW_END_HOURS = 360
+BOOKING_WINDOW_START_HOURS = 36
+BOOKING_WINDOW_END_HOURS = 240
 
 BUSINESS_DAY_START_HOUR = 9   # 9:00 AM
 BUSINESS_DAY_END_HOUR = 16    # 4:00 PM
