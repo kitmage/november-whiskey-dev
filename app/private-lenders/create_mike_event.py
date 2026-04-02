@@ -17,6 +17,7 @@ import argparse
 import json
 import logging
 import os
+from pathlib import Path
 import subprocess
 import sys
 import time
@@ -33,6 +34,9 @@ DEFAULT_DURATION_MINUTES = 30
 DEFAULT_INTER_EVENT_DELAY_SECONDS = 1.0
 DEFAULT_SUBJECT_TEMPLATE = "30min Meeting - {customer_name}"
 DEFAULT_DEBUG_LOG_PATH = "create_mike_event.log"
+SCRIPT_DIR = Path(__file__).resolve().parent
+SIGNAL_FINDER_PATH = SCRIPT_DIR / "signal_finder.py"
+AVAILABILITY_PATH = SCRIPT_DIR / "availability.py"
 
 LOGGER = logging.getLogger("create_mike_event")
 
@@ -155,10 +159,11 @@ def fetch_signal_contacts() -> List[Dict[str, Any]]:
     try:
         LOGGER.debug("Running signal_finder.py for contact resolution.")
         result = subprocess.run(
-            [sys.executable, "signal_finder.py"],
+            [sys.executable, str(SIGNAL_FINDER_PATH)],
             check=True,
             capture_output=True,
             text=True,
+            cwd=str(SCRIPT_DIR),
         )
     except subprocess.CalledProcessError as exc:
         stderr = (exc.stderr or "").strip()
@@ -203,10 +208,11 @@ def fetch_best_start_from_availability() -> str:
     """Run availability.py and extract the selected start time from its JSON output."""
     LOGGER.debug("Running availability.py to fetch best_start_time.")
     result = subprocess.run(
-        [sys.executable, "availability.py"],
+        [sys.executable, str(AVAILABILITY_PATH)],
         check=True,
         capture_output=True,
         text=True,
+        cwd=str(SCRIPT_DIR),
     )
 
     try:
@@ -296,6 +302,17 @@ def make_datetime_pair(start_str: str, duration_minutes: int) -> tuple[str, str]
     return start_dt.isoformat(), end_dt.isoformat()
 
 
+def format_pci_datetime(start_str: str) -> str:
+    """Convert an ISO datetime string into a human-readable PCI datetime string."""
+    start_dt = datetime.fromisoformat(start_str)
+    weekday = start_dt.strftime("%A")
+    two_digit_year = start_dt.strftime("%y")
+    minute = start_dt.strftime("%M")
+    hour_12 = start_dt.hour % 12 or 12
+    am_pm = "am" if start_dt.hour < 12 else "pm"
+    return f"{weekday}, {start_dt.month}/{start_dt.day}/{two_digit_year} at {hour_12}:{minute} {am_pm}"
+
+
 def build_event_body(
     args: argparse.Namespace,
     start_str: str,
@@ -356,13 +373,19 @@ def build_event_body(
     }
 
 
-def send_contact_to_form_submitter(customer_name: str, customer_email: str, dry_run: bool) -> bool:
+def send_contact_to_form_submitter(
+    customer_name: str,
+    customer_email: str,
+    pci_datetime: str,
+    dry_run: bool,
+) -> bool:
     """Forward contact info to form_submitter.py helpers after scheduling."""
     from form_submitter import extract_submission_data, submit_form
 
     signal_event = {
         "email": customer_email,
         "fullName": customer_name,
+        "pci_datetime": pci_datetime,
     }
     submission_data = extract_submission_data(signal_event)
     LOGGER.debug("Submitting contact to form_submitter for email=%s dry_run=%s", customer_email, dry_run)
@@ -408,9 +431,11 @@ def main() -> None:
             # Create the event directly on Mike's calendar.
             result = client.post(f"/users/{mike_email}/events", event_body)
             LOGGER.debug("Created event id=%s for email=%s", result.get("id"), customer_email)
+            pci_datetime = format_pci_datetime(best_start)
             form_submitted = send_contact_to_form_submitter(
                 customer_name=customer_name,
                 customer_email=customer_email,
+                pci_datetime=pci_datetime,
                 dry_run=args.dry_run,
             )
             LOGGER.debug("Form submission result for email=%s submitted=%s", customer_email, form_submitted)
@@ -423,6 +448,7 @@ def main() -> None:
                 "subject": result.get("subject"),
                 "start": result.get("start"),
                 "end": result.get("end"),
+                "pci_datetime": pci_datetime,
                 "form_submitted": form_submitted,
             })
 
