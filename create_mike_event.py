@@ -18,6 +18,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -28,6 +29,7 @@ GRAPH_ROOT = "https://graph.microsoft.com/v1.0"
 TOKEN_URL_TMPL = "https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 DEFAULT_TIMEZONE = "Pacific Standard Time"
 DEFAULT_DURATION_MINUTES = 30
+DEFAULT_INTER_EVENT_DELAY_SECONDS = 1.0
 DEFAULT_SUBJECT_TEMPLATE = "30min Meeting - {customer_name}"
 
 
@@ -51,6 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--location", default="Microsoft Teams")
     parser.add_argument("--timezone", default=DEFAULT_TIMEZONE)
     parser.add_argument("--duration-minutes", type=int, default=DEFAULT_DURATION_MINUTES)
+    parser.add_argument("--inter-event-delay-seconds", type=float, default=DEFAULT_INTER_EVENT_DELAY_SECONDS)
     parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
 
@@ -340,7 +343,7 @@ def main() -> None:
     client = GraphClient(token)
 
     outputs: List[Dict[str, Any]] = []
-    for customer_name, customer_email in customer_identities:
+    for i, (customer_name, customer_email) in enumerate(customer_identities):
         # Fetch fresh availability for each contact when no fixed input was provided.
         if args.input:
             input_payload = read_input_json(args.input)
@@ -358,20 +361,23 @@ def main() -> None:
                 "customer_email": customer_email,
                 "event_payload": event_body,
             })
-            continue
+        else:
+            # Create the event directly on Mike's calendar.
+            result = client.post(f"/users/{mike_email}/events", event_body)
+            outputs.append({
+                "target_calendar_user": mike_email,
+                "customer_name": customer_name,
+                "customer_email": customer_email,
+                "event_id": result.get("id"),
+                "web_link": result.get("webLink"),
+                "subject": result.get("subject"),
+                "start": result.get("start"),
+                "end": result.get("end"),
+            })
 
-        # Create the event directly on Mike's calendar.
-        result = client.post(f"/users/{mike_email}/events", event_body)
-        outputs.append({
-            "target_calendar_user": mike_email,
-            "customer_name": customer_name,
-            "customer_email": customer_email,
-            "event_id": result.get("id"),
-            "web_link": result.get("webLink"),
-            "subject": result.get("subject"),
-            "start": result.get("start"),
-            "end": result.get("end"),
-        })
+        # Keep a small gap between event creations to be friendlier to upstream APIs.
+        if i < len(customer_identities) - 1 and args.inter_event_delay_seconds > 0:
+            time.sleep(args.inter_event_delay_seconds)
 
     print(json.dumps(outputs, indent=2))
 
