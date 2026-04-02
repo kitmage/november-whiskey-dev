@@ -36,6 +36,7 @@ HEADERS = {
 # ---- SHARED UTILS -----------------------------------------------------------
 
 def require_env():
+    """Validate required environment variables before any network calls are made."""
     missing = []
     if not HUBSPOT_TOKEN:
         missing.append("HUBSPOT_TOKEN")
@@ -288,6 +289,12 @@ def get_list_contacts(list_id, properties=None):
     return contacts
 
 def get_contacts_by_pci_flag(list_id, property_name):
+    """
+    Partition list contacts by the PCI eligibility flag.
+
+    Contacts with `{property_name} == "true"` are considered PCI-ineligible and
+    are separated from the set we can act on in downstream automation.
+    """
     contacts = get_list_contacts(list_id, properties=[property_name, "email"])
     pci_eligible = []
     pci_ineligible = []
@@ -310,10 +317,14 @@ def main():
     require_env()
 
     # 1) Get open counts for this campaign (filtered by LOOKBACK_TS)
+    # This returns per-(email asset, campaign id, recipient) open totals so we
+    # can apply a signal threshold before acting on any contact.
     open_counts = get_open_counts_for_campaign(CAMPAIGN_ID)
 
     # 2) Get contacts in the list with PCI flag + email
     pci_eligible, pci_ineligible = get_contacts_by_pci_flag(LIST_ID, PROPERTY_NAME)
+    # `pci_ineligible` is intentionally retained for clarity/documentation of
+    # the split, even though this first step only processes eligible contacts.
 
     # Build a lookup: email (lowercased) -> eligible contact info
     # ONLY PCI-ELIGIBLE contacts here
@@ -337,6 +348,7 @@ def main():
         if count < SIGNAL_THRESHOLD:
             continue
 
+        # Join HubSpot email event recipients to CRM contacts by normalized email.
         contact = eligible_by_email.get(recipient)
         if not contact:
             # recipient not in the PCI_ELIGIBLE portion of the list; skip
@@ -353,7 +365,8 @@ def main():
         # Only counts that already passed the threshold are accumulated
         aggregated_by_contact[contact_id]["openCount"] += count
 
-    # 4) Print one JSON row per contact with cumulative above-threshold openCount
+    # 4) Emit NDJSON (one JSON object per line) for downstream automation steps.
+    #    This format is easy to stream into queue/workflow processors.
     for contact_summary in aggregated_by_contact.values():
         print(json.dumps(contact_summary))
 
