@@ -80,21 +80,21 @@ def is_contact_event_line(line: str) -> bool:
 def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map the event fields into form field values.
-
-    Adjust 'fields' list if your HubSpot form has more fields you want to populate.
     """
+
     email = event.get("email")
-    # Only `email` is required for this workflow. Additional values are forwarded
-    # when present so the form can capture engagement context for routing/scoring.
     open_count = event.get("openCount")
     email_id = event.get("emailId")
     email_campaign_id = event.get("emailCampaignId")
+
+    # This is whatever string you want to send for the PCI - DateTime property.
+    # Example: event may already contain it, or you might build it here.
+    pci_datetime = event.get("pci_datetime")  # e.g. "2026-04-02T13:45:00Z"
 
     fields = [
         {"name": "email", "value": email},
     ]
 
-    # Optional hidden fields (only if corresponding fields exist on the form).
     if open_count is not None:
         fields.append({"name": "open_count", "value": str(open_count)})
     if email_id is not None:
@@ -102,26 +102,12 @@ def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
     if email_campaign_id is not None:
         fields.append({"name": "email_campaign_id", "value": str(email_campaign_id)})
 
+    # NEW: send pci_datetime as a string
+    if pci_datetime is not None:
+        fields.append({"name": "pci_datetime", "value": str(pci_datetime)})
+
     submission = {
         "fields": fields,
-        # Add context / legalConsentOptions here if needed, e.g.:
-        # "context": {
-        #     "pageUri": "https://example.com",
-        #     "pageName": "Signal trigger form",
-        # },
-        # "legalConsentOptions": {
-        #     "consent": {
-        #         "consentToProcess": True,
-        #         "text": "I agree to allow NWM Risk Management to store and process my data.",
-        #         "communications": [
-        #             {
-        #                 "value": True,
-        #                 "subscriptionTypeId": 999,
-        #                 "text": "I agree to receive marketing communications.",
-        #             }
-        #         ],
-        #     }
-        # },
     }
     return submission
 
