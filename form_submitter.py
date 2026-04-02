@@ -115,8 +115,8 @@ def submit_form(email: str, submission_data: Dict[str, Any], dry_run: bool = Fal
 
     if not HUBSPOT_TOKEN:
         raise RuntimeError("HUBSPOT_TOKEN is not set in environment")
-
-    url = f"{BASE_URL}/forms/v2/submissions/forms/{FORM_ID}"
+    
+    url = f"{BASE_URL}/forms/v2/forms/{FORM_ID}/submissions"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
         "Content-Type": "application/json",
