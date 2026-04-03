@@ -324,7 +324,7 @@ def make_datetime_pair(start_str: str, duration_minutes: int) -> tuple[str, str]
     return start_dt.isoformat(), end_dt.isoformat()
 
 
-def format_pci_datetime(start_str: str) -> str:
+def format_pci_datetime(start_str: str, timezone: str) -> str:
     """Convert an ISO datetime string into a human-readable PCI datetime string."""
     start_dt = datetime.fromisoformat(start_str)
     weekday = start_dt.strftime("%A")
@@ -332,7 +332,10 @@ def format_pci_datetime(start_str: str) -> str:
     minute = start_dt.strftime("%M")
     hour_12 = start_dt.hour % 12 or 12
     am_pm = "am" if start_dt.hour < 12 else "pm"
-    return f"{weekday}, {start_dt.month}/{start_dt.day}/{two_digit_year} at {hour_12}:{minute} {am_pm}"
+    return (
+        f"{weekday}, {start_dt.month}/{start_dt.day}/{two_digit_year} "
+        f"at {hour_12}:{minute} {am_pm} ({timezone})"
+    )
 
 
 def build_event_body(
@@ -467,7 +470,7 @@ def main() -> None:
                 teams_join_url = get_teams_join_url(expanded)
                 # Keep richer fields from expanded payload when present.
                 result = {**result, **expanded}
-            pci_datetime = format_pci_datetime(best_start)
+            pci_datetime = format_pci_datetime(best_start, args.timezone)
             form_submitted = send_contact_to_form_submitter(
                 customer_name=customer_name,
                 customer_email=customer_email,
