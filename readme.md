@@ -55,6 +55,31 @@ python -m pip install --upgrade pip
 ```bash
 pip install requests msal python-dotenv hubspot-api-client
 ```
+
+### Troubleshooting: `ModuleNotFoundError: No module named 'requests'`
+
+This error means your current Python interpreter does not have project dependencies installed.
+
+Use this exact sequence from the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install requests msal python-dotenv hubspot-api-client
+python -c "import requests; print(requests.__version__)"
+python signal_finder.py
+```
+
+If it still fails, verify you are running the script with the same interpreter as the virtual environment:
+
+```bash
+which python
+python -V
+python -m pip -V
+```
+
+Each path should point into `.../november-whiskey-dev/.venv/...`.
 ---
 # Env Config
 
