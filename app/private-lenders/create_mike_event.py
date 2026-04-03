@@ -399,6 +399,7 @@ def send_contact_to_form_submitter(
     customer_name: str,
     customer_email: str,
     pci_datetime: str,
+    teams_join_url: Optional[str],
     dry_run: bool,
 ) -> bool:
     """Forward contact info to form_submitter.py helpers after scheduling."""
@@ -408,6 +409,7 @@ def send_contact_to_form_submitter(
         "email": customer_email,
         "fullName": customer_name,
         "pci_datetime": pci_datetime,
+        "teams_join_url": teams_join_url,
     }
     submission_data = extract_submission_data(signal_event)
     LOGGER.debug("Submitting contact to form_submitter for email=%s dry_run=%s", customer_email, dry_run)
@@ -470,6 +472,7 @@ def main() -> None:
                 customer_name=customer_name,
                 customer_email=customer_email,
                 pci_datetime=pci_datetime,
+                teams_join_url=teams_join_url,
                 dry_run=args.dry_run,
             )
             LOGGER.debug("Form submission result for email=%s submitted=%s", customer_email, form_submitted)
