@@ -1,4 +1,4 @@
-# NWM Scheduling + Signal Automation
+# November Whiskey Scheduling + Signal Automation
 
 This repository automates a simple outbound workflow:
 
