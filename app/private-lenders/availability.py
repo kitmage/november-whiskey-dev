@@ -50,6 +50,7 @@ LUNCH_BREAK_END_HOUR = 13
 LUNCH_BREAK_END_MINUTE = 0
 
 INTERVAL_MINUTES = 30
+FRIDAY_AFTERNOON_START_HOUR = 12  # 12:00 PM
 
 
 def get_access_token() -> str:
@@ -283,6 +284,19 @@ def expand_slots_to_scored_starts(
     return scored
 
 
+def filter_out_friday_afternoons(
+    slots: list[tuple[datetime, datetime]],
+    friday_afternoon_start_hour: int,
+) -> list[tuple[datetime, datetime]]:
+    """Remove slots that start on Friday afternoon before scoring."""
+    filtered_slots: list[tuple[datetime, datetime]] = []
+    for slot_start, slot_end in slots:
+        is_friday_afternoon = slot_start.weekday() == 4 and slot_start.hour >= friday_afternoon_start_hour
+        if not is_friday_afternoon:
+            filtered_slots.append((slot_start, slot_end))
+    return filtered_slots
+
+
 def select_earliest_best_start(scored_starts: list[dict]) -> dict | None:
     """Pick the highest-scoring start; break ties by earliest datetime."""
     if not scored_starts:
@@ -339,7 +353,13 @@ def main():
         lunch_end_minute=LUNCH_BREAK_END_MINUTE,
     )
 
-    # 4) Score candidate starts by buffer on each side, then choose best.
+    # 4) Exclude Friday afternoon starts before scoring candidate options.
+    free_slots = filter_out_friday_afternoons(
+        slots=free_slots,
+        friday_afternoon_start_hour=FRIDAY_AFTERNOON_START_HOUR,
+    )
+
+    # 5) Score candidate starts by buffer on each side, then choose best.
     scored_starts = expand_slots_to_scored_starts(
         slots=free_slots,
         interval_minutes=INTERVAL_MINUTES,
