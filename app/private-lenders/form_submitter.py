@@ -90,6 +90,7 @@ def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
     # This is whatever string you want to send for the PCI - DateTime property.
     # Example: event may already contain it, or you might build it here.
     pci_datetime = event.get("pci_datetime")  # e.g. "2026-04-02T13:45:00Z"
+    teams_join_url = event.get("teams_join_url")
 
     fields = [
         {"name": "email", "value": email},
@@ -105,6 +106,8 @@ def extract_submission_data(event: Dict[str, Any]) -> Dict[str, Any]:
     # NEW: send pci_datetime as a string
     if pci_datetime is not None:
         fields.append({"name": "pci_datetime", "value": str(pci_datetime)})
+    if teams_join_url is not None:
+        fields.append({"name": "teams_join_url", "value": str(teams_join_url)})
 
     submission = {
         "fields": fields,

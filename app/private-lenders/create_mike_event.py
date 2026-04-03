@@ -294,6 +294,28 @@ class GraphClient:
             raise GraphError(f"POST {url} failed: {resp.status_code} {resp.text}")
         return resp.json()
 
+    def get(self, path: str) -> Dict[str, Any]:
+        url = f"{GRAPH_ROOT}{path}"
+        resp = self.session.get(url, timeout=30)
+        if not resp.ok:
+            raise GraphError(f"GET {url} failed: {resp.status_code} {resp.text}")
+        return resp.json()
+
+
+def get_teams_join_url(event_payload: Dict[str, Any]) -> Optional[str]:
+    """Extract the best-available Teams meeting URL from a Graph event payload."""
+    online_meeting = event_payload.get("onlineMeeting")
+    if isinstance(online_meeting, dict):
+        join_url = online_meeting.get("joinUrl")
+        if isinstance(join_url, str) and join_url.strip():
+            return join_url.strip()
+
+    online_meeting_url = event_payload.get("onlineMeetingUrl")
+    if isinstance(online_meeting_url, str) and online_meeting_url.strip():
+        return online_meeting_url.strip()
+
+    return None
+
 
 def make_datetime_pair(start_str: str, duration_minutes: int) -> tuple[str, str]:
     """Derive `(start, end)` ISO strings from selected start and meeting duration."""
@@ -302,7 +324,7 @@ def make_datetime_pair(start_str: str, duration_minutes: int) -> tuple[str, str]
     return start_dt.isoformat(), end_dt.isoformat()
 
 
-def format_pci_datetime(start_str: str) -> str:
+def format_pci_datetime(start_str: str, timezone: str) -> str:
     """Convert an ISO datetime string into a human-readable PCI datetime string."""
     start_dt = datetime.fromisoformat(start_str)
     weekday = start_dt.strftime("%A")
@@ -310,7 +332,10 @@ def format_pci_datetime(start_str: str) -> str:
     minute = start_dt.strftime("%M")
     hour_12 = start_dt.hour % 12 or 12
     am_pm = "am" if start_dt.hour < 12 else "pm"
-    return f"{weekday}, {start_dt.month}/{start_dt.day}/{two_digit_year} at {hour_12}:{minute} {am_pm}"
+    return (
+        f"{weekday}, {start_dt.month}/{start_dt.day}/{two_digit_year} "
+        f"at {hour_12}:{minute} {am_pm} ({timezone})"
+    )
 
 
 def build_event_body(
@@ -377,6 +402,7 @@ def send_contact_to_form_submitter(
     customer_name: str,
     customer_email: str,
     pci_datetime: str,
+    teams_join_url: Optional[str],
     dry_run: bool,
 ) -> bool:
     """Forward contact info to form_submitter.py helpers after scheduling."""
@@ -386,6 +412,7 @@ def send_contact_to_form_submitter(
         "email": customer_email,
         "fullName": customer_name,
         "pci_datetime": pci_datetime,
+        "teams_join_url": teams_join_url,
     }
     submission_data = extract_submission_data(signal_event)
     LOGGER.debug("Submitting contact to form_submitter for email=%s dry_run=%s", customer_email, dry_run)
@@ -431,11 +458,24 @@ def main() -> None:
             # Create the event directly on Mike's calendar.
             result = client.post(f"/users/{mike_email}/events", event_body)
             LOGGER.debug("Created event id=%s for email=%s", result.get("id"), customer_email)
-            pci_datetime = format_pci_datetime(best_start)
+            teams_join_url = get_teams_join_url(result)
+            # Some tenants omit onlineMeeting details in the create response.
+            # Follow-up GET ensures we can return the Teams link when available.
+            if not teams_join_url and result.get("id"):
+                event_id = result["id"]
+                expanded = client.get(
+                    f"/users/{mike_email}/events/{event_id}"
+                    "?$select=id,webLink,subject,start,end,onlineMeeting,onlineMeetingUrl"
+                )
+                teams_join_url = get_teams_join_url(expanded)
+                # Keep richer fields from expanded payload when present.
+                result = {**result, **expanded}
+            pci_datetime = format_pci_datetime(best_start, args.timezone)
             form_submitted = send_contact_to_form_submitter(
                 customer_name=customer_name,
                 customer_email=customer_email,
                 pci_datetime=pci_datetime,
+                teams_join_url=teams_join_url,
                 dry_run=args.dry_run,
             )
             LOGGER.debug("Form submission result for email=%s submitted=%s", customer_email, form_submitted)
@@ -445,6 +485,7 @@ def main() -> None:
                 "customer_email": customer_email,
                 "event_id": result.get("id"),
                 "web_link": result.get("webLink"),
+                "teams_join_url": teams_join_url,
                 "subject": result.get("subject"),
                 "start": result.get("start"),
                 "end": result.get("end"),
