@@ -37,7 +37,7 @@ def main() -> int:
 
     for directory in TARGET_DIRECTORIES:
         script_path = app_dir / directory / SCRIPT_NAME
-        print(f"\n# Running {script_path.relative_to(app_dir)} ===")
+        print(f"\n# Running {script_path.relative_to(app_dir)}")
 
         if not script_path.exists():
             print(f"[WARN] Script not found: {script_path}", file=sys.stderr)
