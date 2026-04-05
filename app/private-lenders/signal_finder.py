@@ -20,7 +20,7 @@ HUBSPOT_TOKEN = os.environ.get("HUBSPOT_TOKEN")
 HUBSPOT_APP_ID = int(os.environ.get("HUBSPOT_APP_ID", "2286"))  # 2286 = HubSpot marketing email app
 
 LIST_ID = 677  # HubSpot segment/list ID
-PROPERTY_NAME = "do_not_send_pci"
+PROPERTY_NAME = "pci_automation"
 
 CAMPAIGN_ID = "6afccccd-1f8b-4036-ba17-3eea85f23a05"
 BASE_URL = "https://api.hubapi.com"
@@ -326,8 +326,9 @@ def get_contacts_by_pci_flag(list_id, property_name):
     """
     Partition list contacts by the PCI eligibility flag.
 
-    Contacts with `{property_name} == "true"` are considered PCI-ineligible and
-    are separated from the set we can act on in downstream automation.
+    Contacts with `{property_name}` in {"pci_started", "pci_completed"} are
+    considered PCI-ineligible and are separated from the set we can act on in
+    downstream automation.
     """
     contacts = get_list_contacts(
         list_id,
@@ -338,8 +339,11 @@ def get_contacts_by_pci_flag(list_id, property_name):
 
     for contact in contacts:
         props = contact.get("properties", {}) or {}
-        do_not_send_pci_val = props.get(property_name)
-        is_ineligible = str(do_not_send_pci_val).lower() == "true"
+        pci_automation_val = props.get(property_name)
+        is_ineligible = str(pci_automation_val).lower() in {
+            "pci_started",
+            "pci_completed",
+        }
 
         if is_ineligible:
             pci_ineligible.append(contact)
@@ -414,7 +418,7 @@ def main():
             "id": c.get("id"),
             "email": email,
             "fullName": full_name,
-            "do_not_send_pci": False,  # by definition of pci_eligible
+            "pci_automation": "",  # by definition of pci_eligible
         }
     LOGGER.debug("Built eligible_by_email lookup with %d entries", len(eligible_by_email))
 
