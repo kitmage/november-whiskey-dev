@@ -419,14 +419,22 @@ def send_contact_to_form_submitter(
     return submit_form(customer_email, submission_data, dry_run=dry_run)
 
 
+def get_email_domain(email: str) -> str:
+    """Extract and return domain portion of an email address when present."""
+    local_part, separator, domain = email.partition("@")
+    if separator and local_part and domain:
+        return domain
+    return email
+
+
 def main() -> None:
     args = parse_args()
     configure_logging(args.debug)
     LOGGER.debug("Starting create_mike_event.py with dry_run=%s", args.dry_run)
     customer_identities = resolve_customer_identities(args)
     if not customer_identities:
-        LOGGER.debug("No qualifying contacts resolved. Exiting gracefully with null.")
-        print("null")
+        LOGGER.debug("No qualifying contacts resolved. Exiting with PCI scan no-contacts message.")
+        print("PCI Scan found no eligible contacts.")
         return
     mike_email = load_env("MIKE_ID")
 
@@ -499,7 +507,26 @@ def main() -> None:
             time.sleep(args.inter_event_delay_seconds)
 
     LOGGER.debug("Completed run with %d output records.", len(outputs))
-    print(json.dumps(outputs, indent=2))
+    if args.dry_run:
+        print(json.dumps(outputs, indent=2))
+        return
+
+    summary_blocks: List[str] = []
+    for output in outputs:
+        customer_name = str(output.get("customer_name") or "").strip()
+        customer_email = str(output.get("customer_email") or "").strip()
+        pci_datetime = str(output.get("pci_datetime") or "").strip()
+        email_domain = get_email_domain(customer_email)
+        summary_blocks.append(
+            "\n".join(
+                [
+                    "🎉 Meeting booked!",
+                    f"Who: {customer_name}, {email_domain}",
+                    f"When: {pci_datetime}",
+                ]
+            )
+        )
+    print("\n\n".join(summary_blocks))
 
 
 if __name__ == "__main__":
