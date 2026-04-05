@@ -425,8 +425,8 @@ def main() -> None:
     LOGGER.debug("Starting create_mike_event.py with dry_run=%s", args.dry_run)
     customer_identities = resolve_customer_identities(args)
     if not customer_identities:
-        LOGGER.debug("No qualifying contacts resolved. Exiting gracefully with null.")
-        print("null")
+        LOGGER.debug("No qualifying contacts resolved. Exiting with PCI scan no-contacts message.")
+        print("PCI Scan found no eligible contacts.")
         return
     mike_email = load_env("MIKE_ID")
 
