@@ -9,7 +9,7 @@ from pathlib import Path
 # Directories under ./app to run create_mike_event.py from.
 TARGET_DIRECTORIES = [
     "private-lenders",
-    "insurers",
+    #"insurers",
 ]
 
 SCRIPT_NAME = "create_mike_event.py"
