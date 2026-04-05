@@ -12,7 +12,7 @@ from pathlib import Path
 
 # Directories under ./app to run create_mike_event.py from.
 TARGET_DIRECTORIES = [
-    "private_lenders",
+    "private-lenders",
     #"insurers",
 ]
 
