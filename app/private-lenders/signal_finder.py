@@ -326,9 +326,9 @@ def get_contacts_by_pci_flag(list_id, property_name):
     """
     Partition list contacts by the PCI eligibility flag.
 
-    Contacts with `{property_name} == "pci_completed"` are considered
-    PCI-ineligible and are separated from the set we can act on in downstream
-    automation.
+    Contacts with `{property_name}` in {"pci_started", "pci_completed"} are
+    considered PCI-ineligible and are separated from the set we can act on in
+    downstream automation.
     """
     contacts = get_list_contacts(
         list_id,
@@ -340,7 +340,10 @@ def get_contacts_by_pci_flag(list_id, property_name):
     for contact in contacts:
         props = contact.get("properties", {}) or {}
         pci_automation_val = props.get(property_name)
-        is_ineligible = str(pci_automation_val).lower() == "pci_completed"
+        is_ineligible = str(pci_automation_val).lower() in {
+            "pci_started",
+            "pci_completed",
+        }
 
         if is_ineligible:
             pci_ineligible.append(contact)
