@@ -18,6 +18,12 @@ TARGET_DIRECTORIES = [
 
 SCRIPT_NAME = "create_mike_event.py"
 DISCORD_WEBHOOK_ENV_VAR = "DISCORD_WEBHOOK"
+DISCORD_MAX_CONTENT_LENGTH = 2000
+DISCORD_MESSAGE_SUFFIX = "\n...[truncated]"
+DISCORD_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
+)
 
 
 def send_discord_message(message: str) -> None:
@@ -26,16 +32,31 @@ def send_discord_message(message: str) -> None:
     if not webhook:
         return
 
+    if len(message) > DISCORD_MAX_CONTENT_LENGTH:
+        allowed = DISCORD_MAX_CONTENT_LENGTH - len(DISCORD_MESSAGE_SUFFIX)
+        message = f"{message[:allowed]}{DISCORD_MESSAGE_SUFFIX}"
+
     payload = json.dumps({"content": message}).encode("utf-8")
     request = urllib.request.Request(
         webhook,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": DISCORD_USER_AGENT,
+        },
         method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=10):
             pass
+    except urllib.error.HTTPError as error:
+        response_body = error.read().decode("utf-8", "ignore")
+        print(
+            "[WARN] Failed to send Discord message: "
+            f"HTTP {error.code} {error.reason} - {response_body}",
+            file=sys.stderr,
+        )
     except urllib.error.URLError as error:
         print(f"[WARN] Failed to send Discord message: {error}", file=sys.stderr)
 
