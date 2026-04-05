@@ -1,4 +1,4 @@
-"""Run create_mike_events.py across configured app subdirectories."""
+"""Run create_mike_event.py across configured app subdirectories."""
 
 from __future__ import annotations
 
@@ -10,13 +10,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-# Directories under ./app to run create_mike_events.py from.
+# Directories under ./app to run create_mike_event.py from.
 TARGET_DIRECTORIES = [
     "private_lenders",
-    "insurers",
+    #"insurers",
 ]
 
-SCRIPT_NAME = "create_mike_events.py"
+SCRIPT_NAME = "create_mike_event.py"
 DISCORD_WEBHOOK_ENV_VAR = "DISCORD_WEBHOOK"
 
 
@@ -56,7 +56,7 @@ def main() -> int:
 
     for directory in TARGET_DIRECTORIES:
         script_path = app_dir / directory / SCRIPT_NAME
-        header = f"\n=== Running {script_path.relative_to(app_dir)} ==="
+        header = f"\n# Running {script_path.relative_to(app_dir)}"
         print(header)
 
         if not script_path.exists():
