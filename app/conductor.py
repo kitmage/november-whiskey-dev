@@ -94,7 +94,8 @@ def main() -> int:
             print(stderr, end="", file=sys.stderr)
         exit_line = f"=== Exit code: {exit_code} ==="
         print(exit_line)
-        send_discord_message(f"{header}\n{stdout}{stderr}{exit_line}\n")
+        #send_discord_message(f"{header}\n{stdout}{stderr}{exit_line}\n")
+        send_discord_message(f"{stdout}{stderr}")
 
         if exit_code != 0:
             overall_exit_code = exit_code
