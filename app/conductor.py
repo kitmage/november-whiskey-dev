@@ -1,4 +1,4 @@
-"""Run create_mike_events.py across configured app subdirectories."""
+"""Run create_mike_event.py across configured app subdirectories."""
 
 from __future__ import annotations
 
@@ -6,13 +6,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Directories under ./app to run create_mike_events.py from.
+# Directories under ./app to run create_mike_event.py from.
 TARGET_DIRECTORIES = [
     "private-lenders",
     "insurers",
 ]
 
-SCRIPT_NAME = "create_mike_events.py"
+SCRIPT_NAME = "create_mike_event.py"
 
 
 def run_script(script_path: Path) -> int:
