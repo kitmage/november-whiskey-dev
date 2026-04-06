@@ -46,3 +46,17 @@ def test_render_output_json_handles_private_lenders_workflow_shape():
     loaded = json.loads(rendered)
     assert loaded[0]["contact"]["contactId"] == "123"
     assert loaded[0]["best_start_time"]["score"] == 1
+
+
+def test_render_output_mini_handles_private_lenders_record():
+    record = {
+        "contact": SignalContact(contactId="123", email="a@example.com", fullName="A", openCount=2),
+        "best_start_time": BestStartTime(
+            start="2026-04-06T12:00:00",
+            score=1,
+            buffer_before_blocks=2,
+            buffer_after_blocks=3,
+        ),
+    }
+    rendered = render_output(record, "mini")
+    assert rendered == "🟢 Event booked with A a@example.com 2026-04-06T12:00:00"
