@@ -15,6 +15,7 @@ from november_whiskey.hubspot.signal_finder import HubSpotClient, find_signal_co
 from november_whiskey.logging_config import configure_logging
 from november_whiskey.utils.json_io import render_output
 from november_whiskey.utils.validation import validate_email
+from november_whiskey.workflows.all_segments import run_all_segments_workflow
 from november_whiskey.workflows.private_lenders import run_private_lenders_workflow
 
 
@@ -58,6 +59,10 @@ def build_parser() -> argparse.ArgumentParser:
     workflow_sub = workflow.add_subparsers(dest="workflow_command", required=True)
     workflow_pl = workflow_sub.add_parser("private-lenders")
     workflow_pl.add_argument("--dry-run", action="store_true")
+    workflow_all = workflow_sub.add_parser("all-segments")
+    workflow_all.add_argument("--segments")
+    workflow_all.add_argument("--continue-on-error", action=argparse.BooleanOptionalAction, default=True)
+    workflow_all.add_argument("--dry-run", action="store_true")
 
     return parser
 
@@ -126,6 +131,16 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             token = get_access_token(config.graph)
             result = create_event(token, config.event.target_calendar_user, payload)
+            print(render_output(result, args.output_format))
+            return 0
+
+        if args.command == "workflow" and args.workflow_command == "all-segments":
+            result = run_all_segments_workflow(
+                config,
+                segments_override=args.segments,
+                continue_on_error=args.continue_on_error,
+                dry_run=args.dry_run,
+            )
             print(render_output(result, args.output_format))
             return 0
 
