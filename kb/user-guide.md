@@ -61,6 +61,7 @@ Use this only when you are ready to create real meetings.
 - `text`: easiest to read as a person.
 - `json`: best for saving structured results.
 - `ndjson`: one JSON record per line (used in pipelines).
+- `mini`: compact booking line, e.g. `🟢 Event booked with Jane Doe jane@example.com 2026-04-13T15:30:00`.
 
 > Note: `--output-format` is a global option, so place it right after `november-whiskey` and before the subcommand.
 
