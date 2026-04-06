@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+from .exceptions import ConfigError
+
+
+@dataclass(frozen=True)
+class HubSpotConfig:
+    token: str
+    app_id: int
+    list_id: str
+    property_name: str
+    campaign_id: str
+    lookback_window_hours: int
+    signal_threshold: int
+    portal_id: str
+    form_id: str
+
+
+@dataclass(frozen=True)
+class GraphConfig:
+    tenant_id: str
+    client_id: str
+    client_secret: str
+    graph_timezone: str
+    local_timezone: str
+
+
+@dataclass(frozen=True)
+class SchedulingConfig:
+    users: list[str]
+    booking_window_start_hours: int
+    booking_window_end_hours: int
+    business_day_start_hour: int
+    business_day_end_hour: int
+    lunch_break_start_hour: int
+    lunch_break_start_minute: int
+    lunch_break_end_hour: int
+    lunch_break_end_minute: int
+    interval_minutes: int
+    friday_afternoon_start_hour: int
+    default_duration_minutes: int
+
+
+@dataclass(frozen=True)
+class EventConfig:
+    default_subject_template: str
+    default_location: str
+    inter_event_delay_seconds: float
+    enable_teams_meeting: bool
+    target_calendar_user: str
+
+
+@dataclass(frozen=True)
+class AppConfig:
+    hubspot: HubSpotConfig
+    graph: GraphConfig
+    scheduling: SchedulingConfig
+    event: EventConfig
+
+
+def _require(name: str) -> str:
+    value = os.getenv(name, "").strip()
+    if not value:
+        raise ConfigError(f"Missing required environment variable: {name}")
+    return value
+
+
+def _int(name: str, default: int | None = None) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        if default is None:
+            raise ConfigError(f"Missing required integer environment variable: {name}")
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ConfigError(f"Invalid integer value for {name}: {raw}") from exc
+
+
+def _float(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default))
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise ConfigError(f"Invalid numeric value for {name}: {raw}") from exc
+
+
+def _bool(name: str, default: bool = True) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def load_config() -> AppConfig:
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ModuleNotFoundError:
+        pass
+    hubspot = HubSpotConfig(
+        token=_require("HUBSPOT_TOKEN"),
+        app_id=_int("HUBSPOT_APP_ID", 2286),
+        list_id=_require("HUBSPOT_LIST_ID"),
+        property_name=os.getenv("HUBSPOT_PROPERTY_NAME", "pci_automation"),
+        campaign_id=_require("HUBSPOT_CAMPAIGN_ID"),
+        lookback_window_hours=_int("HUBSPOT_LOOKBACK_WINDOW_HOURS", 360),
+        signal_threshold=_int("HUBSPOT_SIGNAL_THRESHOLD", 3),
+        portal_id=_require("HUBSPOT_PORTAL_ID"),
+        form_id=_require("HUBSPOT_FORM_ID"),
+    )
+    graph = GraphConfig(
+        tenant_id=_require("TENANT_ID"),
+        client_id=_require("CLIENT_ID"),
+        client_secret=_require("CLIENT_SECRET"),
+        graph_timezone=os.getenv("GRAPH_TIMEZONE", "Pacific Standard Time"),
+        local_timezone=os.getenv("LOCAL_TIMEZONE", "America/Los_Angeles"),
+    )
+    users = [x.strip() for x in os.getenv("SCHEDULING_USERS", "").split(",") if x.strip()]
+    if len(users) < 2:
+        raise ConfigError("SCHEDULING_USERS must contain at least two comma-separated users")
+    scheduling = SchedulingConfig(
+        users=users,
+        booking_window_start_hours=_int("BOOKING_WINDOW_START_HOURS", 144),
+        booking_window_end_hours=_int("BOOKING_WINDOW_END_HOURS", 240),
+        business_day_start_hour=_int("BUSINESS_DAY_START_HOUR", 10),
+        business_day_end_hour=_int("BUSINESS_DAY_END_HOUR", 16),
+        lunch_break_start_hour=_int("LUNCH_BREAK_START_HOUR", 11),
+        lunch_break_start_minute=_int("LUNCH_BREAK_START_MINUTE", 30),
+        lunch_break_end_hour=_int("LUNCH_BREAK_END_HOUR", 13),
+        lunch_break_end_minute=_int("LUNCH_BREAK_END_MINUTE", 0),
+        interval_minutes=_int("INTERVAL_MINUTES", 30),
+        friday_afternoon_start_hour=_int("FRIDAY_AFTERNOON_START_HOUR", 12),
+        default_duration_minutes=_int("DEFAULT_DURATION_MINUTES", 30),
+    )
+    event = EventConfig(
+        default_subject_template=os.getenv("DEFAULT_SUBJECT_TEMPLATE", "30min Meeting - {customer_name}"),
+        default_location=os.getenv("DEFAULT_LOCATION", "Microsoft Teams"),
+        inter_event_delay_seconds=_float("EVENT_INTER_DELAY_SECONDS", 1.0),
+        enable_teams_meeting=_bool("ENABLE_TEAMS_MEETING", True),
+        target_calendar_user=_require("MIKE_ID"),
+    )
+    if scheduling.booking_window_end_hours <= scheduling.booking_window_start_hours:
+        raise ConfigError("BOOKING_WINDOW_END_HOURS must be greater than BOOKING_WINDOW_START_HOURS")
+    return AppConfig(hubspot=hubspot, graph=graph, scheduling=scheduling, event=event)
