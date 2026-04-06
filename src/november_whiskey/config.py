@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import dotenv_values, load_dotenv
 
 from .exceptions import ConfigError
 
@@ -96,11 +99,31 @@ def _bool(name: str, default: bool = True) -> bool:
 
 
 def load_config() -> AppConfig:
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()
-    except ModuleNotFoundError:
-        pass
+    load_dotenv(os.getenv("GLOBAL_ENV_PATH", ".env"))
+    audience_segment = os.getenv("AUDIENCE_SEGMENT", "private-lenders").strip() or "private-lenders"
+    segment_env_path = Path(os.getenv("AUDIENCE_ENV_PATH", f"app/{audience_segment}/.env"))
+    if not segment_env_path.exists():
+        raise ConfigError(
+            f"Missing audience config file for '{audience_segment}': {segment_env_path}. "
+            "Create this hidden file and move segment-specific values there."
+        )
+    load_dotenv(segment_env_path, override=True)
+    segment_values = {k: v for k, v in dotenv_values(segment_env_path).items() if v is not None}
+
+    segment_required_keys = (
+        "HUBSPOT_LIST_ID",
+        "HUBSPOT_CAMPAIGN_ID",
+        "HUBSPOT_PORTAL_ID",
+        "HUBSPOT_FORM_ID",
+        "SCHEDULING_USERS",
+        "DEFAULT_SUBJECT_TEMPLATE",
+        "DEFAULT_LOCATION",
+        "EVENT_INTER_DELAY_SECONDS",
+        "ENABLE_TEAMS_MEETING",
+    )
+    for key in segment_required_keys:
+        if not segment_values.get(key, "").strip():
+            raise ConfigError(f"Audience config file is missing required value: {key}")
     hubspot = HubSpotConfig(
         token=_require("HUBSPOT_TOKEN"),
         app_id=_int("HUBSPOT_APP_ID", 2286),

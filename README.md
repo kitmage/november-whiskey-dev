@@ -28,11 +28,17 @@ pip install -e .
 
 ## Environment Setup
 
-Copy `.env.example` to `.env` and replace placeholders:
+Copy `.env.example` to `.env` (global/shared secrets), then copy the audience-specific
+example into a hidden file inside the segment directory:
 
 ```bash
 cp .env.example .env
+cp app/private-lenders/.env.example app/private-lenders/.env
 ```
+
+`load_config()` now loads `.env` first, then overlays `app/<AUDIENCE_SEGMENT>/.env`
+(default segment: `private-lenders`). Put segment values (HubSpot list/campaign/form IDs,
+and booking profile settings) only in that hidden segment file.
 
 Then validate configuration:
 
@@ -94,4 +100,3 @@ black --check src tests
 - Never commit `.venv`.
 - Rotate credentials immediately if exposure is suspected.
 - Do not log bearer tokens/client secrets.
-
