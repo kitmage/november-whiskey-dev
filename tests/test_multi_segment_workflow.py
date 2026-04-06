@@ -5,13 +5,19 @@ from november_whiskey.workflows import multi_segment
 
 
 def test_resolve_segments_cli_precedence(monkeypatch):
-    monkeypatch.setenv("WORKFLOW_SEGMENTS", "env-a,env-b")
+    monkeypatch.setenv("AUDIENCE_SEGMENTS", "env-a,env-b")
     assert multi_segment.resolve_segments("cli-a, cli-b") == ["cli-a", "cli-b"]
 
 
 def test_resolve_segments_env_fallback(monkeypatch):
-    monkeypatch.setenv("WORKFLOW_SEGMENTS", "env-a,env-b")
+    monkeypatch.setenv("AUDIENCE_SEGMENTS", "env-a, env-b, env-a")
     assert multi_segment.resolve_segments(None) == ["env-a", "env-b"]
+
+
+def test_resolve_segments_single_segment_fallback(monkeypatch):
+    monkeypatch.delenv("AUDIENCE_SEGMENTS", raising=False)
+    monkeypatch.setenv("AUDIENCE_SEGMENT", "single-segment")
+    assert multi_segment.resolve_segments(None) == ["single-segment"]
 
 
 def test_run_all_segments_stops_on_error(monkeypatch):
@@ -31,8 +37,13 @@ def test_run_all_segments_stops_on_error(monkeypatch):
 
     monkeypatch.setattr(multi_segment, "load_config", fake_load_config)
     monkeypatch.setattr(multi_segment, "run_private_lenders_workflow", fake_runner)
+    monkeypatch.setattr(
+        multi_segment,
+        "resolve_segments",
+        lambda segments_override=None: ["private-lenders", "private-lenders", "private-lenders"],
+    )
 
-    result = multi_segment.run_all_segments("private-lenders,private-lenders,private-lenders", continue_on_error=False)
+    result = multi_segment.run_all_segments(None, continue_on_error=False)
 
     assert called_segments == ["private-lenders", "private-lenders"]
     assert result["totals"] == {"total_segments": 2, "succeeded": 1, "failed": 1}
@@ -56,8 +67,13 @@ def test_run_all_segments_continues_on_error(monkeypatch):
 
     monkeypatch.setattr(multi_segment, "load_config", fake_load_config)
     monkeypatch.setattr(multi_segment, "run_private_lenders_workflow", fake_runner)
+    monkeypatch.setattr(
+        multi_segment,
+        "resolve_segments",
+        lambda segments_override=None: ["private-lenders", "private-lenders"],
+    )
 
-    result = multi_segment.run_all_segments("private-lenders,private-lenders", continue_on_error=True)
+    result = multi_segment.run_all_segments(None, continue_on_error=True)
 
     assert called_segments == ["private-lenders", "private-lenders"]
     assert result["totals"] == {"total_segments": 2, "succeeded": 1, "failed": 1}
