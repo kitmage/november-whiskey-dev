@@ -16,10 +16,18 @@ def to_obj(value: Any) -> Any:
 
 
 def render_output(value: Any, output_format: str = "json") -> str:
+    obj = to_obj(value)
     if output_format == "json":
-        return json.dumps(to_obj(value), indent=2, sort_keys=True)
+        return json.dumps(obj, indent=2, sort_keys=True)
     if output_format == "text":
-        return str(to_obj(value))
+        return str(obj)
+    if output_format == "mini":
+        if isinstance(obj, dict) and isinstance(obj.get("contact"), dict) and isinstance(obj.get("best_start_time"), dict):
+            return (
+                f"🟢 Event booked with {obj['contact'].get('fullName', '')} "
+                f"{obj['contact'].get('email', '')} {obj['best_start_time'].get('start', '')}"
+            ).strip()
+        return str(obj)
     if output_format == "ndjson":
         if not isinstance(value, Iterable) or isinstance(value, (str, bytes, dict)):
             raise ValueError("NDJSON output expects an iterable of records")
