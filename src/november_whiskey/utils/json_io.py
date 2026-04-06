@@ -7,7 +7,11 @@ from typing import Any, Iterable
 
 def to_obj(value: Any) -> Any:
     if is_dataclass(value):
-        return asdict(value)
+        return to_obj(asdict(value))
+    if isinstance(value, dict):
+        return {key: to_obj(val) for key, val in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [to_obj(item) for item in value]
     return value
 
 
