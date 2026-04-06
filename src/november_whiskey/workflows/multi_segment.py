@@ -1,33 +1,16 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Callable
 from typing import Any
 
-from november_whiskey.config import load_config
+import os
+
+from november_whiskey.config import load_config, resolve_audience_segments
 from november_whiskey.exceptions import ConfigError, WorkflowError
 from november_whiskey.workflows.private_lenders import run_private_lenders_workflow
 
-DEFAULT_SEGMENTS: tuple[str, ...] = ("private-lenders",)
-SEGMENTS_ENV_VAR = "WORKFLOW_SEGMENTS"
-
-
-def _parse_segments(raw_segments: str | None) -> list[str]:
-    if not raw_segments:
-        return []
-    return [segment.strip() for segment in raw_segments.split(",") if segment.strip()]
-
-
 def resolve_segments(segments_override: str | None = None) -> list[str]:
-    segments = _parse_segments(segments_override)
-    if segments:
-        return segments
-
-    env_segments = _parse_segments(os.getenv(SEGMENTS_ENV_VAR))
-    if env_segments:
-        return env_segments
-
-    return list(DEFAULT_SEGMENTS)
+    return resolve_audience_segments(segments_override)
 
 
 def _extract_key_output_fields(output: Any) -> dict[str, Any]:

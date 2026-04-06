@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import dotenv_values, load_dotenv
 
 from .exceptions import ConfigError
+
+DEFAULT_AUDIENCE_SEGMENT = "private-lenders"
+AUDIENCE_SEGMENTS_ENV_VAR = "AUDIENCE_SEGMENTS"
+_SEGMENT_ALLOWED_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
 @dataclass(frozen=True)
@@ -98,9 +103,63 @@ def _bool(name: str, default: bool = True) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _validate_segment(segment: str, source: str) -> None:
+    if not segment:
+        raise ConfigError(f"{source} contains an empty segment value. Remove empty entries like consecutive commas.")
+    if ".." in segment or "/" in segment or "\\" in segment:
+        raise ConfigError(
+            f"Invalid segment '{segment}' from {source}: path traversal is not allowed. "
+            "Use only simple segment names like 'private-lenders'."
+        )
+    if not _SEGMENT_ALLOWED_PATTERN.fullmatch(segment):
+        raise ConfigError(
+            f"Invalid segment '{segment}' from {source}: only letters, digits, hyphens, and underscores are allowed."
+        )
+
+
+def parse_segment_list(raw_segments: str, *, source: str) -> list[str]:
+    parsed_segments: list[str] = []
+    seen_segments: set[str] = set()
+
+    for item in raw_segments.split(","):
+        segment = item.strip()
+        if not segment:
+            continue
+        _validate_segment(segment, source)
+        if segment not in seen_segments:
+            seen_segments.add(segment)
+            parsed_segments.append(segment)
+    return parsed_segments
+
+
+def resolve_audience_segments(segments_override: str | None = None) -> list[str]:
+    if segments_override is not None:
+        segments = parse_segment_list(segments_override, source="CLI --segments")
+        if not segments:
+            raise ConfigError(
+                "CLI --segments override was provided but no valid segments were found. "
+                "Pass a comma-separated list like '--segments private-lenders,credit-unions'."
+            )
+        return segments
+
+    env_segments_raw = os.getenv(AUDIENCE_SEGMENTS_ENV_VAR)
+    if env_segments_raw is not None:
+        env_segments = parse_segment_list(env_segments_raw, source=AUDIENCE_SEGMENTS_ENV_VAR)
+        if not env_segments:
+            raise ConfigError(
+                f"{AUDIENCE_SEGMENTS_ENV_VAR} is set but no valid segments were found. "
+                "Set it to a comma-separated list like 'private-lenders,credit-unions' or unset it."
+            )
+        return env_segments
+
+    audience_segment = os.getenv("AUDIENCE_SEGMENT", DEFAULT_AUDIENCE_SEGMENT).strip() or DEFAULT_AUDIENCE_SEGMENT
+    _validate_segment(audience_segment, "AUDIENCE_SEGMENT")
+    return [audience_segment]
+
+
 def load_config() -> AppConfig:
     load_dotenv(os.getenv("GLOBAL_ENV_PATH", ".env"))
-    audience_segment = os.getenv("AUDIENCE_SEGMENT", "private-lenders").strip() or "private-lenders"
+    audience_segment = resolve_audience_segments()[0]
     segment_env_path = Path(os.getenv("AUDIENCE_ENV_PATH", f"app/{audience_segment}/.env"))
     if not segment_env_path.exists():
         raise ConfigError(

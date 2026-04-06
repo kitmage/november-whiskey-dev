@@ -21,3 +21,16 @@ def test_config_validation_missing_segment_file(monkeypatch):
     monkeypatch.setenv("AUDIENCE_ENV_PATH", "tests/fixtures/does-not-exist.env")
     with pytest.raises(ConfigError, match="Missing audience config file"):
         load_config()
+
+
+def test_config_validation_invalid_audience_segments_value(monkeypatch):
+    monkeypatch.setenv("AUDIENCE_SEGMENTS", "private-lenders,../bad-segment")
+    with pytest.raises(ConfigError, match="path traversal is not allowed"):
+        load_config()
+
+
+def test_config_validation_empty_cli_segments_override():
+    from november_whiskey.config import resolve_audience_segments
+
+    with pytest.raises(ConfigError, match="CLI --segments override was provided but no valid segments were found"):
+        resolve_audience_segments("  ,  ")
