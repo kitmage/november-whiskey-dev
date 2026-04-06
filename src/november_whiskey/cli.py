@@ -15,7 +15,7 @@ from november_whiskey.hubspot.signal_finder import HubSpotClient, find_signal_co
 from november_whiskey.logging_config import configure_logging
 from november_whiskey.utils.json_io import render_output
 from november_whiskey.utils.validation import validate_email
-from november_whiskey.workflows.all_segments import run_all_segments_workflow
+from november_whiskey.workflows.multi_segment import run_all_segments
 from november_whiskey.workflows.private_lenders import run_private_lenders_workflow
 
 
@@ -73,10 +73,21 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(args.debug)
 
     try:
-        config = load_config()
         if args.command == "config-check":
+            load_config()
             print(json.dumps({"ok": True}, sort_keys=True))
             return 0
+
+        if args.command == "workflow" and args.workflow_command == "all-segments":
+            result = run_all_segments(
+                segments_override=args.segments,
+                continue_on_error=args.continue_on_error,
+                dry_run=args.dry_run,
+            )
+            print(render_output(result, args.output_format))
+            return 0
+
+        config = load_config()
 
         if args.command == "signal" and args.signal_command == "find":
             client = HubSpotClient(config.hubspot.token)
@@ -131,16 +142,6 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             token = get_access_token(config.graph)
             result = create_event(token, config.event.target_calendar_user, payload)
-            print(render_output(result, args.output_format))
-            return 0
-
-        if args.command == "workflow" and args.workflow_command == "all-segments":
-            result = run_all_segments_workflow(
-                config,
-                segments_override=args.segments,
-                continue_on_error=args.continue_on_error,
-                dry_run=args.dry_run,
-            )
             print(render_output(result, args.output_format))
             return 0
 
