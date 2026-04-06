@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from datetime import datetime
+from typing import Any
 
 from november_whiskey.config import load_config
 from november_whiskey.exceptions import AvailabilityError, ConfigError, GraphAPIError, HubSpotAPIError, WorkflowError
@@ -14,6 +15,7 @@ from november_whiskey.hubspot.form_submitter import submit_contact_form
 from november_whiskey.hubspot.signal_finder import HubSpotClient, find_signal_contacts
 from november_whiskey.logging_config import configure_logging
 from november_whiskey.utils.json_io import render_output
+from november_whiskey.utils.notifications import send_discord_webhook
 from november_whiskey.utils.redaction import sanitize_error_text
 from november_whiskey.utils.validation import validate_email
 from november_whiskey.workflows.multi_segment import run_all_segments
@@ -23,7 +25,7 @@ from november_whiskey.workflows.private_lenders import run_private_lenders_workf
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="november-whiskey")
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--output-format", choices=["json", "ndjson", "text"], default="json")
+    parser.add_argument("--output-format", choices=["json", "ndjson", "text", "mini"], default="json")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("config-check")
@@ -147,8 +149,22 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "workflow" and args.workflow_command == "private-lenders":
-            result = run_private_lenders_workflow(config, dry_run=args.dry_run)
-            print(render_output(result, args.output_format))
+            stream_formats = {"text", "ndjson", "mini"}
+
+            def _on_booking_processed(record: dict[str, Any]) -> None:
+                if args.output_format in stream_formats:
+                    print(render_output(record if args.output_format != "ndjson" else [record], args.output_format))
+                if config.notifications.discord_webhook_url:
+                    discord_message = render_output(record, "mini")
+                    send_discord_webhook(config.notifications.discord_webhook_url, discord_message)
+
+            result = run_private_lenders_workflow(
+                config,
+                dry_run=args.dry_run,
+                on_booking_processed=_on_booking_processed,
+            )
+            if args.output_format not in stream_formats:
+                print(render_output(result, args.output_format))
             return 0
 
         raise WorkflowError("Unknown command")
