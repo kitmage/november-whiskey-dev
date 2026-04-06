@@ -11,10 +11,12 @@ def run_all_segments_workflow(
     segments_override: str | None = None,
     continue_on_error: bool = True,
     dry_run: bool = False,
+    strict_missing_workflow: bool = False,
 ) -> dict[str, Any]:
     _ = config
     return run_all_segments(
         segments_override=segments_override,
         continue_on_error=continue_on_error,
         dry_run=dry_run,
+        strict_missing_workflow=strict_missing_workflow,
     )
