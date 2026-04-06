@@ -40,6 +40,19 @@ cp app/private-lenders/.env.example app/private-lenders/.env
 (default segment: `private-lenders`). Put segment values (HubSpot list/campaign/form IDs,
 and booking profile settings) only in that hidden segment file.
 
+### Segment Resolution (`.env`)
+
+`# Segment resolution` in `.env` controls which hidden audience file is loaded:
+
+- `AUDIENCE_SEGMENT=private-lenders` means the app resolves to `app/private-lenders/.env`.
+- If you set `AUDIENCE_SEGMENT=insurers`, it resolves to `app/insurers/.env`.
+- `AUDIENCE_ENV_PATH` is an explicit override and takes precedence over `AUDIENCE_SEGMENT`.
+
+Resolution order:
+1. Load root `.env` (global/shared values).
+2. Resolve segment env path from `AUDIENCE_ENV_PATH` or `app/<AUDIENCE_SEGMENT>/.env`.
+3. Load segment file and override matching keys from root `.env`.
+
 Then validate configuration:
 
 ```bash
