@@ -14,6 +14,18 @@ from november_whiskey.hubspot.signal_finder import HubSpotClient, SignalContact,
 from november_whiskey.utils.validation import validate_email
 
 
+def _extract_teams_join_url(event_result: dict) -> str | None:
+    online_meeting = event_result.get("onlineMeeting")
+    if isinstance(online_meeting, dict):
+        join_url = online_meeting.get("joinUrl")
+        if join_url:
+            return str(join_url)
+    online_meeting_url = event_result.get("onlineMeetingUrl")
+    if online_meeting_url:
+        return str(online_meeting_url)
+    return None
+
+
 def run_private_lenders_workflow(
     config: AppConfig,
     dry_run: bool = False,
@@ -44,10 +56,19 @@ def run_private_lenders_workflow(
 
         if dry_run:
             event_result = {"dry_run": True, "event_payload": event_payload}
-            form_result = submit_contact_form(hs_client, config.hubspot, {"email": contact.email}, dry_run=True)
         else:
             event_result = create_event(token, config.event.target_calendar_user, event_payload)
-            form_result = submit_contact_form(hs_client, config.hubspot, {"email": contact.email}, dry_run=False)
+
+        form_event = {
+            "email": contact.email,
+            "openCount": contact.openCount,
+            "pci_datetime": availability.best_start_time.start,
+        }
+        teams_join_url = _extract_teams_join_url(event_result)
+        if teams_join_url:
+            form_event["teams_join_url"] = teams_join_url
+
+        form_result = submit_contact_form(hs_client, config.hubspot, form_event, dry_run=dry_run)
 
         output_record = {
             "contact": contact,
