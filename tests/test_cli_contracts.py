@@ -44,14 +44,16 @@ def test_workflow_all_segments_exit_code_zero_on_success(monkeypatch, capsys):
         assert kwargs["continue_on_error"] is True
         assert kwargs["dry_run"] is True
         return {
+            "run_id": "run-1",
             "segments": ["seg-a", "seg-b"],
             "continue_on_error": True,
             "dry_run": True,
             "strict_missing_workflow": False,
             "totals": {"total_segments": 2, "succeeded": 2, "failed": 0},
+            "summary": {"total_segments": 2, "succeeded": 2, "failed": 0, "failed_segments": []},
             "results": [
-                {"segment": "seg-a", "status": "success", "error": None, "key_output_fields": {"output_type": "list", "records_processed": 1}},
-                {"segment": "seg-b", "status": "success", "error": None, "key_output_fields": {"output_type": "dict", "keys": ["ok"]}},
+                {"segment": "seg-a", "run_id": "run-1", "status": "success", "error": None, "duration_ms": 1, "key_output_fields": {"output_type": "list", "records_processed": 1}},
+                {"segment": "seg-b", "run_id": "run-1", "status": "success", "error": None, "duration_ms": 1, "key_output_fields": {"output_type": "dict", "keys": ["ok"]}},
             ],
         }
 
@@ -63,8 +65,40 @@ def test_workflow_all_segments_exit_code_zero_on_success(monkeypatch, capsys):
     assert exit_code == 0
     rendered = json.loads(captured.out)
     assert rendered["totals"] == {"total_segments": 2, "succeeded": 2, "failed": 0}
+    assert rendered["summary"]["failed_segments"] == []
     assert rendered["results"][0]["key_output_fields"]["output_type"] == "list"
     assert rendered["results"][1]["key_output_fields"]["output_type"] == "dict"
+
+
+def test_workflow_all_segments_exit_code_non_zero_when_any_failed(monkeypatch, capsys):
+    def fake_run_all_segments(**kwargs):
+        _ = kwargs
+        return {
+            "run_id": "run-1",
+            "segments": ["seg-a"],
+            "continue_on_error": True,
+            "dry_run": True,
+            "strict_missing_workflow": False,
+            "totals": {"total_segments": 1, "succeeded": 0, "failed": 1},
+            "summary": {"total_segments": 1, "succeeded": 0, "failed": 1, "failed_segments": ["seg-a"]},
+            "results": [
+                {
+                    "segment": "seg-a",
+                    "run_id": "run-1",
+                    "status": "failed",
+                    "error": "boom",
+                    "duration_ms": 1,
+                    "key_output_fields": {},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(cli, "run_all_segments", fake_run_all_segments)
+    exit_code = cli.main(["workflow", "all-segments", "--segments", "seg-a", "--dry-run"])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    rendered = json.loads(captured.out)
+    assert rendered["summary"]["failed_segments"] == ["seg-a"]
 
 
 def test_workflow_all_segments_exit_code_two_on_config_error(monkeypatch, capsys):
@@ -81,3 +115,19 @@ def test_workflow_all_segments_exit_code_two_on_config_error(monkeypatch, capsys
     captured = capsys.readouterr()
     assert exit_code == 2
     assert "ERROR: invalid segments" in captured.err
+
+
+def test_cli_sanitizes_sensitive_values_from_error_output(monkeypatch, capsys):
+    from november_whiskey.exceptions import ConfigError
+
+    monkeypatch.setenv("GRAPH_CLIENT_SECRET", "cli-secret")
+
+    def fake_run_all_segments(**kwargs):
+        _ = kwargs
+        raise ConfigError("invalid cli-secret")
+
+    monkeypatch.setattr(cli, "run_all_segments", fake_run_all_segments)
+    exit_code = cli.main(["workflow", "all-segments", "--segments", "seg-a"])
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "ERROR: invalid [REDACTED]" in captured.err

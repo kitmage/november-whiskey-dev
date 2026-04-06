@@ -72,7 +72,10 @@ def test_run_all_segments_stops_on_error(monkeypatch):
 
     assert called_segments == ["private-lenders", "private-lenders"]
     assert result["totals"] == {"total_segments": 2, "succeeded": 1, "failed": 1}
+    assert result["summary"]["failed_segments"] == ["private-lenders"]
     assert [row["status"] for row in result["results"]] == ["success", "failed"]
+    assert all("run_id" in row for row in result["results"])
+    assert all("duration_ms" in row for row in result["results"])
 
 
 def test_run_all_segments_continues_on_error(monkeypatch):
@@ -104,6 +107,7 @@ def test_run_all_segments_continues_on_error(monkeypatch):
     assert result["totals"] == {"total_segments": 2, "succeeded": 1, "failed": 1}
     assert result["results"][0]["error"] == "first failure"
     assert result["results"][1]["key_output_fields"]["records_processed"] == 2
+    assert result["summary"]["failed_segments"] == ["private-lenders"]
 
 
 def test_run_all_segments_unregistered_segment_non_strict(monkeypatch):
@@ -118,6 +122,7 @@ def test_run_all_segments_unregistered_segment_non_strict(monkeypatch):
     assert result["totals"] == {"total_segments": 1, "succeeded": 0, "failed": 1}
     assert result["results"][0]["status"] == "failed"
     assert result["results"][0]["error"] == "No workflow registered for segment 'unknown-segment'"
+    assert result["results"][0]["run_id"] == result["run_id"]
 
 
 def test_run_all_segments_unregistered_segment_strict(monkeypatch):
@@ -151,20 +156,17 @@ def test_run_all_segments_two_segments_both_succeed(monkeypatch):
 
     assert called_segments == ["seg-a", "seg-b"]
     assert result["totals"] == {"total_segments": 2, "succeeded": 2, "failed": 0}
-    assert result["results"] == [
-        {
-            "segment": "seg-a",
-            "status": "success",
-            "error": None,
-            "key_output_fields": {"output_type": "dict", "keys": ["ok", "segment"]},
-        },
-        {
-            "segment": "seg-b",
-            "status": "success",
-            "error": None,
-            "key_output_fields": {"output_type": "dict", "keys": ["ok", "segment"]},
-        },
-    ]
+    assert result["summary"]["failed_segments"] == []
+    assert result["results"][0]["segment"] == "seg-a"
+    assert result["results"][0]["status"] == "success"
+    assert result["results"][0]["run_id"] == result["run_id"]
+    assert result["results"][0]["error"] is None
+    assert result["results"][0]["key_output_fields"] == {"output_type": "dict", "keys": ["ok", "segment"]}
+    assert result["results"][1]["segment"] == "seg-b"
+    assert result["results"][1]["status"] == "success"
+    assert result["results"][1]["run_id"] == result["run_id"]
+    assert result["results"][1]["error"] is None
+    assert result["results"][1]["key_output_fields"] == {"output_type": "dict", "keys": ["ok", "segment"]}
 
 
 def test_run_all_segments_first_fails_then_second_succeeds_with_continue_on_error(monkeypatch):
@@ -189,18 +191,15 @@ def test_run_all_segments_first_fails_then_second_succeeds_with_continue_on_erro
 
     assert called_segments == ["seg-a", "seg-b"]
     assert result["totals"] == {"total_segments": 2, "succeeded": 1, "failed": 1}
-    assert result["results"][0] == {
-        "segment": "seg-a",
-        "status": "failed",
-        "error": "seg-a failed",
-        "key_output_fields": {},
-    }
-    assert result["results"][1] == {
-        "segment": "seg-b",
-        "status": "success",
-        "error": None,
-        "key_output_fields": {"records_processed": 1, "output_type": "list"},
-    }
+    assert result["summary"]["failed_segments"] == ["seg-a"]
+    assert result["results"][0]["segment"] == "seg-a"
+    assert result["results"][0]["status"] == "failed"
+    assert result["results"][0]["error"] == "seg-a failed"
+    assert result["results"][0]["key_output_fields"] == {}
+    assert result["results"][1]["segment"] == "seg-b"
+    assert result["results"][1]["status"] == "success"
+    assert result["results"][1]["error"] is None
+    assert result["results"][1]["key_output_fields"] == {"records_processed": 1, "output_type": "list"}
 
 
 def test_run_all_segments_first_fails_and_aborts_with_continue_on_error_disabled(monkeypatch):
@@ -224,11 +223,39 @@ def test_run_all_segments_first_fails_and_aborts_with_continue_on_error_disabled
 
     assert called_segments == ["seg-a"]
     assert result["totals"] == {"total_segments": 1, "succeeded": 0, "failed": 1}
-    assert result["results"] == [
-        {
-            "segment": "seg-a",
-            "status": "failed",
-            "error": "seg-a failed",
-            "key_output_fields": {},
-        }
-    ]
+    assert result["summary"]["failed_segments"] == ["seg-a"]
+    assert result["results"][0]["segment"] == "seg-a"
+    assert result["results"][0]["status"] == "failed"
+    assert result["results"][0]["error"] == "seg-a failed"
+    assert result["results"][0]["key_output_fields"] == {}
+
+
+def test_run_all_segments_sanitizes_error_output(monkeypatch):
+    monkeypatch.setenv("HUBSPOT_TOKEN", "super-secret-token")
+    monkeypatch.setattr(multi_segment, "resolve_segments", lambda segments_override=None: ["seg-a"])
+    monkeypatch.setattr(multi_segment, "get_workflow_runner", lambda segment, strict=False: lambda c, dry_run=False: [])
+
+    def fake_load_config():
+        raise ConfigError("token leaked super-secret-token")
+
+    monkeypatch.setattr(multi_segment, "load_config", fake_load_config)
+    result = multi_segment.run_all_segments(None, continue_on_error=True)
+
+    assert result["results"][0]["error"] == "token leaked [REDACTED]"
+
+
+def test_run_all_segments_logs_segment_start_and_end(monkeypatch, caplog):
+    monkeypatch.setattr(multi_segment, "resolve_segments", lambda segments_override=None: ["seg-a"])
+    monkeypatch.setattr(multi_segment, "load_config", lambda: object())
+    monkeypatch.setattr(multi_segment, "get_workflow_runner", lambda segment, strict=False: lambda c, dry_run=False: [])
+
+    with caplog.at_level("INFO"):
+        result = multi_segment.run_all_segments(None, continue_on_error=True)
+
+    assert any(
+        f"segment_start segment=seg-a run_id={result['run_id']}" in record.message for record in caplog.records
+    )
+    assert any(
+        f"segment_end segment=seg-a run_id={result['run_id']} status=success" in record.message
+        for record in caplog.records
+    )

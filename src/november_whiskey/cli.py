@@ -14,6 +14,7 @@ from november_whiskey.hubspot.form_submitter import submit_contact_form
 from november_whiskey.hubspot.signal_finder import HubSpotClient, find_signal_contacts
 from november_whiskey.logging_config import configure_logging
 from november_whiskey.utils.json_io import render_output
+from november_whiskey.utils.redaction import sanitize_error_text
 from november_whiskey.utils.validation import validate_email
 from november_whiskey.workflows.multi_segment import run_all_segments
 from november_whiskey.workflows.private_lenders import run_private_lenders_workflow
@@ -85,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
             )
             print(render_output(result, args.output_format))
-            return 0
+            return 0 if result["totals"]["failed"] == 0 else 1
 
         config = load_config()
 
@@ -152,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
 
         raise WorkflowError("Unknown command")
     except (ConfigError, HubSpotAPIError, GraphAPIError, AvailabilityError, WorkflowError) as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"ERROR: {sanitize_error_text(str(exc))}", file=sys.stderr)
         return 2
 
 
