@@ -20,7 +20,7 @@ Ask your administrator for:
 
 ## Common commands
 
-Run these from the project folder.
+Run these from the project root folder (the directory that contains `.env` and `app/`).
 
 ### 1) Check setup
 
@@ -37,13 +37,13 @@ If setup is correct, it prints:
 ### 2) Preview engaged contacts (safe)
 
 ```bash
-november-whiskey signal find --output-format text
+november-whiskey --output-format text signal find
 ```
 
 ### 3) Preview full workflow (safe dry-run)
 
 ```bash
-november-whiskey workflow private-lenders --dry-run --output-format text
+november-whiskey --output-format text workflow private-lenders --dry-run
 ```
 
 This does **not** create real calendar events.
@@ -51,7 +51,7 @@ This does **not** create real calendar events.
 ### 4) Run full workflow live
 
 ```bash
-november-whiskey workflow private-lenders --output-format text
+november-whiskey --output-format text workflow private-lenders
 ```
 
 Use this only when you are ready to create real meetings.
@@ -61,6 +61,8 @@ Use this only when you are ready to create real meetings.
 - `text`: easiest to read as a person.
 - `json`: best for saving structured results.
 - `ndjson`: one JSON record per line (used in pipelines).
+
+> Note: `--output-format` is a global option, so place it right after `november-whiskey` and before the subcommand.
 
 ## Safety tips
 
@@ -73,6 +75,11 @@ Use this only when you are ready to create real meetings.
 ### "ERROR: Missing required environment variable"
 
 Your `.env` is missing values. Ask your administrator to re-provision it.
+
+### "Missing audience config file for 'private-lenders': app/private-lenders/.env"
+
+The segment-specific env file is missing at `app/private-lenders/.env`, or you ran the command from the wrong folder.
+Run commands from the project root, or ask your administrator to set `AUDIENCE_ENV_PATH` correctly.
 
 ### "No mutual availability found"
 
