@@ -41,9 +41,9 @@ def _sync_contact_properties(client: HubSpotClient, email: str, properties: dict
 
 def extract_submission_data(event: dict[str, Any]) -> dict[str, Any]:
     fields = [{"name": "email", "value": event.get("email", "")}]
-    for key in ("openCount", "emailId", "emailCampaignId", "pci_datetime", "teams_join_url"):
+    for key in ("pci_datetime", "teams_join_url", "emailId", "emailCampaignId"):
         if event.get(key) is not None:
-            fields.append({"name": key.lower(), "value": str(event[key])})
+            fields.append({"name": key, "value": str(event[key])})
     return {"fields": fields}
 
 
