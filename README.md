@@ -29,24 +29,35 @@ pip install -e .
 ## Environment Setup
 
 Copy `.env.example` to `.env` (global/shared secrets), then copy the audience-specific
-example into a hidden file inside the segment directory:
+example into hidden files inside each segment directory:
 
 ```bash
 cp .env.example .env
 cp app/private-lenders/.env.example app/private-lenders/.env
+cp app/insurers/.env.example app/insurers/.env
 ```
 
 `load_config()` now loads `.env` first, then overlays `app/<AUDIENCE_SEGMENT>/.env`
 (default segment: `private-lenders`). Put segment values (HubSpot list/campaign/form IDs,
 and booking profile settings) only in that hidden segment file.
 
-### Segment Resolution (`.env`)
+### Segment Resolution + Precedence (`.env` and CLI)
 
-`# Segment resolution` in `.env` controls which hidden audience file is loaded:
+Use these variables in root `.env`:
 
-- `AUDIENCE_SEGMENT=private-lenders` means the app resolves to `app/private-lenders/.env`.
-- If you set `AUDIENCE_SEGMENT=insurers`, it resolves to `app/insurers/.env`.
-- `AUDIENCE_ENV_PATH` is an explicit override and takes precedence over `AUDIENCE_SEGMENT`.
+```dotenv
+AUDIENCE_SEGMENT=private-lenders
+AUDIENCE_SEGMENTS=private-lenders,insurers
+```
+
+- `AUDIENCE_SEGMENT` is the single-segment fallback.
+- `AUDIENCE_SEGMENTS` is a comma-separated multi-segment list used by `workflow all-segments`.
+- `AUDIENCE_ENV_PATH` is an explicit per-run env file override and takes precedence over the resolved `app/<segment>/.env` path.
+
+Audience selection precedence is:
+1. CLI override `--segments ...`
+2. `.env` value `AUDIENCE_SEGMENTS`
+3. `.env` value `AUDIENCE_SEGMENT`
 
 Resolution order:
 1. Load root `.env` (global/shared values).
@@ -67,11 +78,53 @@ python -m november_whiskey form submit --email person@example.com --dry-run
 python -m november_whiskey availability best-start
 python -m november_whiskey event create --customer-name "X" --customer-email "x@example.com" --dry-run
 python -m november_whiskey workflow private-lenders --dry-run
+python -m november_whiskey workflow all-segments --dry-run
 ```
 
 Global options:
 - `--debug`
 - `--output-format json|ndjson|text`
+
+### Multi-Segment Workflow Examples
+
+Run all configured segments from `.env` (`AUDIENCE_SEGMENTS`, falling back to `AUDIENCE_SEGMENT`):
+
+```bash
+python -m november_whiskey workflow all-segments --dry-run
+```
+
+Run only selected segments (CLI override takes precedence):
+
+```bash
+python -m november_whiskey workflow all-segments --segments private-lenders,insurers --dry-run
+```
+
+Expected summary output shape (includes success/failure per segment):
+
+```json
+{
+  "segments": ["private-lenders", "insurers"],
+  "continue_on_error": true,
+  "dry_run": true,
+  "totals": {
+    "total_segments": 2,
+    "succeeded": 1,
+    "failed": 1
+  },
+  "results": [
+    {
+      "segment": "private-lenders",
+      "status": "success",
+      "error": null
+    },
+    {
+      "segment": "unknown-segment",
+      "status": "failed",
+      "error": "No workflow registered for segment 'unknown-segment'"
+    }
+  ]
+}
+```
 
 ## Output Examples
 
@@ -96,6 +149,7 @@ Dry-run workflow output contains exact event payloads (no remote writes).
 - `app/private-lenders/availability.py` -> `november-whiskey availability best-start` (preserved behavior)
 - `app/private-lenders/create_mike_event.py` -> `november-whiskey workflow private-lenders` (preserved behavior, modularized)
 - `app/conductor.py` -> `november-whiskey workflow private-lenders` (single workflow entry)
+- `november-whiskey workflow private-lenders` remains supported during the transition to `workflow all-segments`.
 
 Compatibility wrappers remain under `app/` and call the new CLI.
 
