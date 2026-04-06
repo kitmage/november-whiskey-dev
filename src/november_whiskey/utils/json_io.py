@@ -1,0 +1,23 @@
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, is_dataclass
+from typing import Any, Iterable
+
+
+def to_obj(value: Any) -> Any:
+    if is_dataclass(value):
+        return asdict(value)
+    return value
+
+
+def render_output(value: Any, output_format: str = "json") -> str:
+    if output_format == "json":
+        return json.dumps(to_obj(value), indent=2, sort_keys=True)
+    if output_format == "text":
+        return str(to_obj(value))
+    if output_format == "ndjson":
+        if not isinstance(value, Iterable) or isinstance(value, (str, bytes, dict)):
+            raise ValueError("NDJSON output expects an iterable of records")
+        return "\n".join(json.dumps(to_obj(item), sort_keys=True) for item in value)
+    raise ValueError(f"Unsupported output format: {output_format}")
