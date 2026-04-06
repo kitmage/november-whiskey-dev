@@ -30,8 +30,8 @@ apt install -y git python3 python3-venv python3-pip
 ## 4) Clone project and install Python dependencies
 
 ```bash
-git clone <your-repo-url> november-whiskey-dev
-cd november-whiskey-dev
+git clone <your-repo-url> conductor-app
+cd conductor-app
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -95,7 +95,7 @@ crontab -e
 Example (run every day at 9:00 AM UTC):
 
 ```cron
-0 9 * * * cd /root/november-whiskey-dev && /root/november-whiskey-dev/.venv/bin/november-whiskey workflow private-lenders --output-format text >> /root/november-whiskey-dev/workflow.log 2>&1
+0 9 * * * cd /root/conductor-app && /root/conductor-app/.venv/bin/november-whiskey workflow private-lenders --output-format text >> /root/conductor-app/workflow.log 2>&1
 ```
 
 Adjust paths/usernames to your setup.
