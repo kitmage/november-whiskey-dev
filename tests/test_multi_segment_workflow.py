@@ -1,6 +1,8 @@
 import os
 
-from november_whiskey.exceptions import ConfigError
+import pytest
+
+from november_whiskey.exceptions import ConfigError, WorkflowError
 from november_whiskey.workflows import multi_segment
 
 
@@ -36,7 +38,7 @@ def test_run_all_segments_stops_on_error(monkeypatch):
         return [{"id": 1}]
 
     monkeypatch.setattr(multi_segment, "load_config", fake_load_config)
-    monkeypatch.setattr(multi_segment, "run_private_lenders_workflow", fake_runner)
+    monkeypatch.setattr(multi_segment, "get_workflow_runner", lambda segment, strict=False: fake_runner)
     monkeypatch.setattr(
         multi_segment,
         "resolve_segments",
@@ -66,7 +68,7 @@ def test_run_all_segments_continues_on_error(monkeypatch):
         return [{"id": 1}, {"id": 2}]
 
     monkeypatch.setattr(multi_segment, "load_config", fake_load_config)
-    monkeypatch.setattr(multi_segment, "run_private_lenders_workflow", fake_runner)
+    monkeypatch.setattr(multi_segment, "get_workflow_runner", lambda segment, strict=False: fake_runner)
     monkeypatch.setattr(
         multi_segment,
         "resolve_segments",
@@ -79,3 +81,28 @@ def test_run_all_segments_continues_on_error(monkeypatch):
     assert result["totals"] == {"total_segments": 2, "succeeded": 1, "failed": 1}
     assert result["results"][0]["error"] == "first failure"
     assert result["results"][1]["key_output_fields"]["records_processed"] == 2
+
+
+def test_run_all_segments_unregistered_segment_non_strict(monkeypatch):
+    monkeypatch.setattr(
+        multi_segment,
+        "resolve_segments",
+        lambda segments_override=None: ["unknown-segment"],
+    )
+
+    result = multi_segment.run_all_segments(None, continue_on_error=True, strict_missing_workflow=False)
+
+    assert result["totals"] == {"total_segments": 1, "succeeded": 0, "failed": 1}
+    assert result["results"][0]["status"] == "failed"
+    assert result["results"][0]["error"] == "No workflow registered for segment 'unknown-segment'"
+
+
+def test_run_all_segments_unregistered_segment_strict(monkeypatch):
+    monkeypatch.setattr(
+        multi_segment,
+        "resolve_segments",
+        lambda segments_override=None: ["unknown-segment"],
+    )
+
+    with pytest.raises(WorkflowError, match="No workflow registered for segment 'unknown-segment'"):
+        multi_segment.run_all_segments(None, continue_on_error=False, strict_missing_workflow=True)
