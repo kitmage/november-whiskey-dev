@@ -2,18 +2,9 @@
 
 This guide explains how to run November Whiskey on DigitalOcean.
 
-## Should this run on a Droplet or an App Platform app?
-
-Short answer: **use a Droplet** for most teams.
-
-- **Droplet (recommended):** best when you need scheduled jobs (cron), local `.env` files, full control over Python/runtime, and direct script/CLI operation.
-- **App Platform:** better for always-on web services, not ideal for cron-style automation unless you redesign around workers/jobs and managed secrets.
-
-For the current workflow (scheduled automation, CLI-driven, API integrations), a **Droplet is the simplest and most reliable fit**.
-
 ---
 
-## Option A (Recommended): Deploy on a DigitalOcean Droplet
+## Deploy on a DigitalOcean Droplet
 
 ## 1) Create the Droplet
 
@@ -108,23 +99,6 @@ Example (run every day at 9:00 AM UTC):
 ```
 
 Adjust paths/usernames to your setup.
-
----
-
-## Option B: App Platform (only if you need managed deploy UX)
-
-Use App Platform only if you’re prepared to model this as a worker/job service.
-
-High-level approach:
-1. Create an App from GitHub repo.
-2. Set build/run commands.
-3. Add all env vars in App Platform Secrets.
-4. Run as worker process or scheduled job equivalent.
-
-Tradeoffs:
-- Less direct control than Droplet
-- Cron-like scheduling may be less straightforward
-- Better for teams already standardized on App Platform
 
 ---
 
