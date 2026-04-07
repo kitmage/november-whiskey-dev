@@ -38,7 +38,7 @@ class HubSpotClient:
                 continue
             if not response.ok:
                 if method.upper() == "PATCH" and path.startswith("/crm/v3/objects/contacts/") and response.status_code == 403:
-                    LOGGER.warning(
+                    LOGGER.debug(
                         "Ignoring HubSpot 403 for contact PATCH %s; continuing without contact property update.",
                         path,
                     )
