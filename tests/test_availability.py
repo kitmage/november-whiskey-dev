@@ -71,3 +71,30 @@ def test_slice_ranges_to_intervals():
     ranges = [(datetime(2026, 1, 5, 10, 0), datetime(2026, 1, 5, 11, 0))]
     slots = slice_ranges_to_intervals(ranges, 30)
     assert len(slots) == 2
+
+
+def test_two_or_more_free_users_are_treated_as_available():
+    start = datetime(2026, 1, 5, 10, 0)
+    # 3 users: at 10:00 and 10:30 at least 2 are free, at 11:00 only 1 is free.
+    views = ["000", "001", "011"]
+    ranges = find_mutual_free_ranges(views, start, 30, min_free_users=2)
+    assert ranges == [(datetime(2026, 1, 5, 10, 0), datetime(2026, 1, 5, 11, 0))]
+
+
+def test_scoring_prefers_slots_with_more_free_users():
+    starts = [
+        (datetime(2026, 1, 6, 10, 0), datetime(2026, 1, 6, 10, 30)),
+        (datetime(2026, 1, 6, 10, 30), datetime(2026, 1, 6, 11, 0)),
+    ]
+    scored = score_candidate_starts(
+        starts,
+        30,
+        slot_free_counts={
+            datetime(2026, 1, 6, 10, 0): 2,
+            datetime(2026, 1, 6, 10, 30): 3,
+        },
+    )
+    best = select_best_start(scored)
+    assert best is not None
+    assert best.start == "2026-01-06T10:30:00"
+    assert best.free_user_count == 3

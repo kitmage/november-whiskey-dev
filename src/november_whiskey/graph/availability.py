@@ -15,6 +15,7 @@ class BestStartTime:
     score: int
     buffer_before_blocks: int
     buffer_after_blocks: int
+    free_user_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -39,16 +40,22 @@ def parse_schedule_views(response: dict) -> list[str]:
     return views
 
 
-def find_mutual_free_ranges(schedule_views: list[str], start_dt: datetime, interval_minutes: int) -> list[tuple[datetime, datetime]]:
+def find_mutual_free_ranges(
+    schedule_views: list[str],
+    start_dt: datetime,
+    interval_minutes: int,
+    min_free_users: int = 2,
+) -> list[tuple[datetime, datetime]]:
     slot_count = min(len(s) for s in schedule_views)
     ranges = []
     current_start = None
     for i in range(slot_count):
         slot_start = start_dt + timedelta(minutes=i * interval_minutes)
-        everyone_free = all(view[i] == "0" for view in schedule_views)
-        if everyone_free and current_start is None:
+        free_user_count = sum(1 for view in schedule_views if view[i] == "0")
+        enough_users_free = free_user_count >= min_free_users
+        if enough_users_free and current_start is None:
             current_start = slot_start
-        if not everyone_free and current_start is not None:
+        if not enough_users_free and current_start is not None:
             ranges.append((current_start, slot_start))
             current_start = None
     if current_start is not None:
@@ -86,7 +93,19 @@ def exclude_friday_afternoon(slots: list[tuple[datetime, datetime]], config: Sch
     return [s for s in slots if not (s[0].weekday() == 4 and s[0].hour >= config.friday_afternoon_start_hour)]
 
 
-def score_candidate_starts(slots: list[tuple[datetime, datetime]], interval_minutes: int) -> list[dict]:
+def count_free_users_by_slot(schedule_views: list[str], start_dt: datetime, interval_minutes: int) -> dict[datetime, int]:
+    slot_count = min(len(s) for s in schedule_views)
+    return {
+        start_dt + timedelta(minutes=i * interval_minutes): sum(1 for view in schedule_views if view[i] == "0")
+        for i in range(slot_count)
+    }
+
+
+def score_candidate_starts(
+    slots: list[tuple[datetime, datetime]],
+    interval_minutes: int,
+    slot_free_counts: dict[datetime, int] | None = None,
+) -> list[dict]:
     starts = [s[0] for s in slots]
     scored = []
     interval = timedelta(minutes=interval_minutes)
@@ -101,7 +120,16 @@ def score_candidate_starts(slots: list[tuple[datetime, datetime]], interval_minu
         while j < len(starts) and starts[j] - starts[j - 1] == interval:
             after += 1
             j += 1
-        scored.append({"start": dt, "score": min(before, after), "buffer_before_blocks": before, "buffer_after_blocks": after})
+        free_user_count = slot_free_counts.get(dt, 0) if slot_free_counts else 0
+        scored.append(
+            {
+                "start": dt,
+                "score": free_user_count * 1000 + min(before, after),
+                "buffer_before_blocks": before,
+                "buffer_after_blocks": after,
+                "free_user_count": free_user_count,
+            }
+        )
     return scored
 
 
@@ -115,6 +143,7 @@ def select_best_start(scored: list[dict]) -> BestStartTime | None:
         score=best["score"],
         buffer_before_blocks=best["buffer_before_blocks"],
         buffer_after_blocks=best["buffer_after_blocks"],
+        free_user_count=best.get("free_user_count", 0),
     )
 
 
@@ -147,9 +176,11 @@ def compute_best_start_from_graph(access_token: str, graph: GraphConfig, schedul
     start, end = build_search_window(now, scheduling, graph.local_timezone)
     response = get_schedule(access_token, graph, scheduling, start, end)
     views = parse_schedule_views(response)
-    free_ranges = find_mutual_free_ranges(views, start, scheduling.interval_minutes)
+    minimum_free_users = min(2, len(scheduling.users))
+    free_ranges = find_mutual_free_ranges(views, start, scheduling.interval_minutes, min_free_users=minimum_free_users)
     slots = slice_ranges_to_intervals(free_ranges, scheduling.interval_minutes)
     slots = filter_business_hours(slots, scheduling)
     slots = exclude_lunch(slots, scheduling)
     slots = exclude_friday_afternoon(slots, scheduling)
-    return AvailabilityResult(best_start_time=select_best_start(score_candidate_starts(slots, scheduling.interval_minutes)))
+    free_counts = count_free_users_by_slot(views, start, scheduling.interval_minutes)
+    return AvailabilityResult(best_start_time=select_best_start(score_candidate_starts(slots, scheduling.interval_minutes, free_counts)))
