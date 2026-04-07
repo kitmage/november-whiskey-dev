@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 logger = logging.getLogger(__name__)
 
 
-def send_discord_webhook(webhook_url: str, content: str, timeout_seconds: float = 10.0) -> None:
+def send_discord_webhook(webhook_url: str, content: str, timeout_seconds: float = 10.0) -> bool:
     payload = json.dumps({"content": content}).encode("utf-8")
     request = Request(
         webhook_url,
@@ -17,7 +17,12 @@ def send_discord_webhook(webhook_url: str, content: str, timeout_seconds: float 
         method="POST",
     )
     try:
-        with urlopen(request, timeout=timeout_seconds):
-            return
+        with urlopen(request, timeout=timeout_seconds) as response:
+            status = getattr(response, "status", 204)
+            if 200 <= status < 300:
+                return True
+            logger.warning("Discord webhook returned non-success status: %s", status)
+            return False
     except URLError as exc:
         logger.warning("Failed to send Discord webhook notification: %s", exc)
+        return False

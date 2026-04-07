@@ -232,7 +232,7 @@ def load_config() -> AppConfig:
         target_calendar_user=_require("MIKE_ID"),
     )
     notifications = NotificationsConfig(
-        discord_webhook_url=os.getenv("DISCORD_WEBHOOK_URL", "").strip() or None,
+        discord_webhook_url=(os.getenv("DISCORD_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK") or "").strip() or None,
     )
     if scheduling.booking_window_end_hours <= scheduling.booking_window_start_hours:
         raise ConfigError("BOOKING_WINDOW_END_HOURS must be greater than BOOKING_WINDOW_START_HOURS")

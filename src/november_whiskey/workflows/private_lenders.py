@@ -11,6 +11,7 @@ from november_whiskey.graph.availability import compute_best_start_from_graph
 from november_whiskey.graph.events import build_event_payload, create_event
 from november_whiskey.hubspot.form_submitter import submit_contact_form
 from november_whiskey.hubspot.signal_finder import HubSpotClient, SignalContact, find_signal_contacts
+from november_whiskey.utils.time import format_pacific_human
 from november_whiskey.utils.validation import validate_email
 
 
@@ -62,7 +63,7 @@ def run_private_lenders_workflow(
         form_event = {
             "email": contact.email,
             "openCount": contact.openCount,
-            "pci_datetime": availability.best_start_time.start,
+            "pci_datetime": format_pacific_human(availability.best_start_time.start),
         }
         teams_join_url = _extract_teams_join_url(event_result)
         if teams_join_url:
@@ -73,6 +74,7 @@ def run_private_lenders_workflow(
         output_record = {
             "contact": contact,
             "best_start_time": availability.best_start_time,
+            "pci_datetime": form_event["pci_datetime"],
             "event": event_result,
             "form": form_result,
         }

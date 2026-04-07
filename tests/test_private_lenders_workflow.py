@@ -52,5 +52,5 @@ def test_private_lenders_form_submission_includes_pci_datetime_and_teams_url(mon
 
     assert captured_form_event["email"] == "john@example.com"
     assert captured_form_event["openCount"] == 16
-    assert captured_form_event["pci_datetime"] == "2026-04-14T13:00:00"
+    assert captured_form_event["pci_datetime"] == "Tuesday, 4/14 at 1:00 pm Pacific"
     assert captured_form_event["teams_join_url"] == "https://teams.microsoft.com/l/meetup-join/test"

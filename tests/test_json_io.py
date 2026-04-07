@@ -60,3 +60,13 @@ def test_render_output_mini_handles_private_lenders_record():
     }
     rendered = render_output(record, "mini")
     assert rendered == "🟢 Event booked with A a@example.com 2026-04-06T12:00:00"
+
+
+def test_render_output_mini_prefers_pci_datetime_when_present():
+    record = {
+        "contact": {"fullName": "A", "email": "a@example.com"},
+        "best_start_time": {"start": "2026-04-06T12:00:00"},
+        "pci_datetime": "Monday, 4/6 at 12:00 pm Pacific",
+    }
+    rendered = render_output(record, "mini")
+    assert rendered == "🟢 Event booked with A a@example.com Monday, 4/6 at 12:00 pm Pacific"

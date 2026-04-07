@@ -23,9 +23,10 @@ def render_output(value: Any, output_format: str = "json") -> str:
         return str(obj)
     if output_format == "mini":
         if isinstance(obj, dict) and isinstance(obj.get("contact"), dict) and isinstance(obj.get("best_start_time"), dict):
+            pci_datetime = obj.get("pci_datetime") or obj["best_start_time"].get("start", "")
             return (
                 f"🟢 Event booked with {obj['contact'].get('fullName', '')} "
-                f"{obj['contact'].get('email', '')} {obj['best_start_time'].get('start', '')}"
+                f"{obj['contact'].get('email', '')} {pci_datetime}"
             ).strip()
         return str(obj)
     if output_format == "ndjson":

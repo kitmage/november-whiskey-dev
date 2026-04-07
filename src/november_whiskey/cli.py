@@ -156,7 +156,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(render_output(record if args.output_format != "ndjson" else [record], args.output_format))
                 if config.notifications.discord_webhook_url:
                     discord_message = render_output(record, "mini")
-                    send_discord_webhook(config.notifications.discord_webhook_url, discord_message)
+                    if not send_discord_webhook(config.notifications.discord_webhook_url, discord_message):
+                        print("WARNING: Discord webhook notification failed.", file=sys.stderr)
 
             result = run_private_lenders_workflow(
                 config,
