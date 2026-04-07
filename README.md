@@ -83,7 +83,12 @@ python -m november_whiskey workflow all-segments --dry-run
 
 Global options:
 - `--debug`
-- `--output-format json|ndjson|text`
+- `--output-format json|ndjson|text|mini`
+
+`mini` output format is intended for booking notifications and prints:
+`🟢 Event booked with {full name} {email address} {pci_datetime}`.
+
+If `DISCORD_WEBHOOK_URL` is set, `workflow private-lenders` also posts each successful booking to Discord using that same mini line format.
 
 ### Multi-Segment Workflow Examples
 

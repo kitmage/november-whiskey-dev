@@ -37,6 +37,12 @@ class HubSpotClient:
                 time.sleep(sleep_for)
                 continue
             if not response.ok:
+                if method.upper() == "PATCH" and path.startswith("/crm/v3/objects/contacts/") and response.status_code == 403:
+                    LOGGER.debug(
+                        "Ignoring HubSpot 403 for contact PATCH %s; continuing without contact property update.",
+                        path,
+                    )
+                    return {"ignored": True, "status": response.status_code}
                 raise HubSpotAPIError(f"HubSpot {method} {path} failed ({response.status_code})")
             return response.json()
         raise HubSpotAPIError(f"HubSpot {method} {path} failed after retries")
