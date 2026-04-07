@@ -160,3 +160,49 @@ def test_private_lenders_streams_text_output_per_booking(monkeypatch, capsys):
     assert exit_code == 0
     assert "John Doe" in captured.out
     assert captured.out.count("\n") == 1
+
+
+def test_private_lenders_no_contacts_prints_and_notifies(monkeypatch, capsys):
+    sent_messages = []
+    monkeypatch.setattr(
+        cli,
+        "load_config",
+        lambda: type("Cfg", (), {"notifications": type("Notif", (), {"discord_webhook_url": "https://discord.test"})()})(),
+    )
+    monkeypatch.setattr(cli, "run_private_lenders_workflow", lambda config, dry_run=False, on_booking_processed=None: [])
+    monkeypatch.setattr(cli, "send_discord_webhook", lambda url, content: sent_messages.append((url, content)) or True)
+
+    exit_code = cli.main(["--output-format", "mini", "workflow", "private-lenders"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "⚫ No PCI signals found." in captured.out
+    assert sent_messages == [("https://discord.test", "⚫ No PCI signals found.")]
+
+
+def test_private_lenders_no_availability_uses_expected_mini_message(monkeypatch, capsys):
+    sent_messages = []
+    monkeypatch.setattr(
+        cli,
+        "load_config",
+        lambda: type("Cfg", (), {"notifications": type("Notif", (), {"discord_webhook_url": "https://discord.test"})()})(),
+    )
+
+    def fake_run_private_lenders_workflow(config, dry_run=False, on_booking_processed=None):
+        _ = (config, dry_run)
+        record = {
+            "contact": {"fullName": "John Doe", "email": "john@example.com"},
+            "error": "No mutual availability found",
+            "error_code": "no_availability",
+        }
+        on_booking_processed(record)
+        return [record]
+
+    monkeypatch.setattr(cli, "run_private_lenders_workflow", fake_run_private_lenders_workflow)
+    monkeypatch.setattr(cli, "send_discord_webhook", lambda url, content: sent_messages.append((url, content)) or True)
+
+    exit_code = cli.main(["--output-format", "mini", "workflow", "private-lenders"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    expected = "🔴 PCI signal detected for John Doe john@example.com, but the calendars are booked full."
+    assert expected in captured.out
+    assert sent_messages == [("https://discord.test", expected)]

@@ -41,10 +41,18 @@ def run_private_lenders_workflow(
     outputs = []
     for i, contact in enumerate(contacts):
         if not validate_email(contact.email):
-            raise WorkflowError(f"Invalid contact email: {contact.email}")
+            output_record = {"contact": contact, "error": f"Invalid contact email: {contact.email}", "error_code": "invalid_email"}
+            outputs.append(output_record)
+            if on_booking_processed is not None:
+                on_booking_processed(output_record)
+            continue
         availability = compute_best_start_from_graph(token, config.graph, config.scheduling, now=datetime.utcnow().astimezone())
         if not availability.best_start_time:
-            raise WorkflowError("No mutual availability found")
+            output_record = {"contact": contact, "error": "No mutual availability found", "error_code": "no_availability"}
+            outputs.append(output_record)
+            if on_booking_processed is not None:
+                on_booking_processed(output_record)
+            continue
 
         event_payload = build_event_payload(
             config.event,
@@ -55,29 +63,32 @@ def run_private_lenders_workflow(
             duration_minutes=config.scheduling.default_duration_minutes,
         )
 
-        if dry_run:
-            event_result = {"dry_run": True, "event_payload": event_payload}
-        else:
-            event_result = create_event(token, config.event.target_calendar_user, event_payload)
+        try:
+            if dry_run:
+                event_result = {"dry_run": True, "event_payload": event_payload}
+            else:
+                event_result = create_event(token, config.event.target_calendar_user, event_payload)
 
-        form_event = {
-            "email": contact.email,
-            "openCount": contact.openCount,
-            "pci_datetime": format_pacific_human(availability.best_start_time.start),
-        }
-        teams_join_url = _extract_teams_join_url(event_result)
-        if teams_join_url:
-            form_event["teams_join_url"] = teams_join_url
+            form_event = {
+                "email": contact.email,
+                "openCount": contact.openCount,
+                "pci_datetime": format_pacific_human(availability.best_start_time.start),
+            }
+            teams_join_url = _extract_teams_join_url(event_result)
+            if teams_join_url:
+                form_event["teams_join_url"] = teams_join_url
 
-        form_result = submit_contact_form(hs_client, config.hubspot, form_event, dry_run=dry_run)
+            form_result = submit_contact_form(hs_client, config.hubspot, form_event, dry_run=dry_run)
 
-        output_record = {
-            "contact": contact,
-            "best_start_time": availability.best_start_time,
-            "pci_datetime": form_event["pci_datetime"],
-            "event": event_result,
-            "form": form_result,
-        }
+            output_record = {
+                "contact": contact,
+                "best_start_time": availability.best_start_time,
+                "pci_datetime": form_event["pci_datetime"],
+                "event": event_result,
+                "form": form_result,
+            }
+        except Exception as exc:
+            output_record = {"contact": contact, "error": str(exc), "error_code": "booking_error"}
         outputs.append(output_record)
         if on_booking_processed is not None:
             on_booking_processed(output_record)

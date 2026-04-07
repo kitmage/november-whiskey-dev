@@ -151,19 +151,48 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "workflow" and args.workflow_command == "private-lenders":
             stream_formats = {"text", "ndjson", "mini"}
 
+            def _format_private_lenders_message(record: dict[str, Any]) -> str:
+                contact = record.get("contact", {}) if isinstance(record, dict) else {}
+                if isinstance(contact, dict):
+                    full_name = contact.get("fullName", "unknown")
+                    email = contact.get("email", "unknown")
+                else:
+                    full_name = getattr(contact, "fullName", "unknown")
+                    email = getattr(contact, "email", "unknown")
+                if record.get("error_code") == "no_availability":
+                    return f"🔴 PCI signal detected for {full_name} {email}, but the calendars are booked full."
+                if record.get("error"):
+                    return f"🔴 PCI signal detected for {full_name} {email}, but processing failed: {record.get('error')}"
+                return render_output(record, "mini")
+
             def _on_booking_processed(record: dict[str, Any]) -> None:
                 if args.output_format in stream_formats:
-                    print(render_output(record if args.output_format != "ndjson" else [record], args.output_format))
+                    if args.output_format == "mini":
+                        print(_format_private_lenders_message(record))
+                    else:
+                        print(render_output(record if args.output_format != "ndjson" else [record], args.output_format))
                 if config.notifications.discord_webhook_url:
-                    discord_message = render_output(record, "mini")
+                    discord_message = _format_private_lenders_message(record)
                     if not send_discord_webhook(config.notifications.discord_webhook_url, discord_message):
                         print("WARNING: Discord webhook notification failed.", file=sys.stderr)
 
-            result = run_private_lenders_workflow(
-                config,
-                dry_run=args.dry_run,
-                on_booking_processed=_on_booking_processed,
-            )
+            try:
+                result = run_private_lenders_workflow(
+                    config,
+                    dry_run=args.dry_run,
+                    on_booking_processed=_on_booking_processed,
+                )
+            except Exception as exc:
+                if config.notifications.discord_webhook_url:
+                    send_discord_webhook(config.notifications.discord_webhook_url, f"🔴 Workflow failed: {sanitize_error_text(str(exc))}")
+                raise
+            if not result:
+                no_signals_message = "⚫ No PCI signals found."
+                if args.output_format in stream_formats:
+                    print(no_signals_message)
+                if config.notifications.discord_webhook_url:
+                    if not send_discord_webhook(config.notifications.discord_webhook_url, no_signals_message):
+                        print("WARNING: Discord webhook notification failed.", file=sys.stderr)
             if args.output_format not in stream_formats:
                 print(render_output(result, args.output_format))
             return 0
