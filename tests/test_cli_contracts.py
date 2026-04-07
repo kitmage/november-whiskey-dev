@@ -14,6 +14,8 @@ def test_parser_output_format_choices():
     parser = build_parser()
     args = parser.parse_args(["--output-format", "json", "config-check"])
     assert args.output_format == "json"
+    args_mini = parser.parse_args(["--output-format", "mini", "config-check"])
+    assert args_mini.output_format == "mini"
 
 
 def test_parser_workflow_all_segments_arguments():
@@ -131,3 +133,30 @@ def test_cli_sanitizes_sensitive_values_from_error_output(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert exit_code == 2
     assert "ERROR: invalid [REDACTED]" in captured.err
+
+
+def test_private_lenders_streams_text_output_per_booking(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli,
+        "load_config",
+        lambda: type("Cfg", (), {"notifications": type("Notif", (), {"discord_webhook_url": None})()})(),
+    )
+
+    def fake_run_private_lenders_workflow(config, dry_run=False, on_booking_processed=None):
+        _ = (config, dry_run)
+        row = {
+            "contact": {"fullName": "John Doe", "email": "john@example.com"},
+            "best_start_time": {"start": "2026-04-13T15:30:00"},
+            "event": {"id": "evt-1"},
+            "form": {"submitted": True},
+        }
+        assert on_booking_processed is not None
+        on_booking_processed(row)
+        return [row]
+
+    monkeypatch.setattr(cli, "run_private_lenders_workflow", fake_run_private_lenders_workflow)
+    exit_code = cli.main(["--output-format", "text", "workflow", "private-lenders"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "John Doe" in captured.out
+    assert captured.out.count("\n") == 1

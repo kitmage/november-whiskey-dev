@@ -62,11 +62,17 @@ class EventConfig:
 
 
 @dataclass(frozen=True)
+class NotificationsConfig:
+    discord_webhook_url: str | None
+
+
+@dataclass(frozen=True)
 class AppConfig:
     hubspot: HubSpotConfig
     graph: GraphConfig
     scheduling: SchedulingConfig
     event: EventConfig
+    notifications: NotificationsConfig
 
 
 def _require(name: str) -> str:
@@ -225,6 +231,9 @@ def load_config() -> AppConfig:
         enable_teams_meeting=_bool("ENABLE_TEAMS_MEETING", True),
         target_calendar_user=_require("MIKE_ID"),
     )
+    notifications = NotificationsConfig(
+        discord_webhook_url=(os.getenv("DISCORD_WEBHOOK_URL") or os.getenv("DISCORD_WEBHOOK") or "").strip() or None,
+    )
     if scheduling.booking_window_end_hours <= scheduling.booking_window_start_hours:
         raise ConfigError("BOOKING_WINDOW_END_HOURS must be greater than BOOKING_WINDOW_START_HOURS")
-    return AppConfig(hubspot=hubspot, graph=graph, scheduling=scheduling, event=event)
+    return AppConfig(hubspot=hubspot, graph=graph, scheduling=scheduling, event=event, notifications=notifications)
