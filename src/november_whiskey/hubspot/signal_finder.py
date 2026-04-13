@@ -128,7 +128,7 @@ def find_signal_contacts(
     for c in contacts:
         props = c.get("properties", {}) or {}
         pci_val = str(props.get(config.property_name, "")).lower()
-        if pci_val in {"pci_started", "pci_completed"}:
+        if pci_val in {"pci_completed"}:
             continue
         email = normalize_email(props.get("email") or "")
         if not email:
