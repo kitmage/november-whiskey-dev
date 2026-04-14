@@ -78,6 +78,7 @@ def find_signal_contacts(
             break
 
     open_counts: dict[str, int] = {}
+    open_sources: dict[str, list[dict[str, str | int]]] = {}
     for email_id in email_ids:
         meta = client.request("GET", f"/marketing/v3/emails/{email_id}")
         campaign_ids = set(meta.get("allEmailCampaignIds", []))
@@ -89,7 +90,8 @@ def find_signal_contacts(
                 params = {
                     "appId": config.app_id,
                     "emailCampaignId": ecid,
-                    "type": "OPEN",
+                    "eventType": "OPEN",
+                    "excludeFilteredEvents": "true",
                     "limit": 1000,
                     **({"offset": offset} if offset else {}),
                 }
@@ -99,6 +101,13 @@ def find_signal_contacts(
                     recipient = normalize_email(ev.get("recipient") or "")
                     if isinstance(created, (int, float)) and created >= lookback_ts and recipient:
                         open_counts[recipient] = open_counts.get(recipient, 0) + 1
+                        open_sources.setdefault(recipient, []).append(
+                            {
+                                "emailId": str(email_id),
+                                "emailCampaignId": str(ecid),
+                                "created": int(created),
+                            }
+                        )
                 if not events.get("hasMore"):
                     break
                 offset = events.get("offset")
@@ -128,7 +137,7 @@ def find_signal_contacts(
     for c in contacts:
         props = c.get("properties", {}) or {}
         pci_val = str(props.get(config.property_name, "")).lower()
-        if pci_val in {"pci_started", "pci_completed"}:
+        if pci_val in {"pci_completed"}:
             continue
         email = normalize_email(props.get("email") or "")
         if not email:
@@ -141,6 +150,12 @@ def find_signal_contacts(
         if count < signal_threshold or email not in eligible_by_email:
             continue
         contact_id, full_name = eligible_by_email[email]
+        LOGGER.debug(
+            "Signal match email=%s openCount=%d sources=%s",
+            email,
+            count,
+            open_sources.get(email, []),
+        )
         out.append(SignalContact(contactId=contact_id, email=email, fullName=full_name, openCount=count))
     LOGGER.debug("Signal contacts=%d", len(out))
     return out
