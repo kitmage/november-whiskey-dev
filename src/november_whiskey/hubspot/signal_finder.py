@@ -146,8 +146,13 @@ def find_signal_contacts(
         eligible_by_email[email] = (str(c.get("id")), full_name)
 
     out: list[SignalContact] = []
-    for email, count in sorted(open_counts.items()):
-        if count < signal_threshold or email not in eligible_by_email:
+    for email, campaign_counts in sorted(opens_by_recipient.items()):
+        trigger_email_campaign_id, open_count = max(
+            campaign_counts.items(),
+            key=lambda item: (item[1], item[0]),
+            default=("", 0),
+        )
+        if open_count < signal_threshold or email not in eligible_by_email:
             continue
         contact_id, full_name = eligible_by_email[email]
         LOGGER.debug(
