@@ -77,7 +77,7 @@ def find_signal_contacts(
         if not after:
             break
 
-    open_counts: dict[str, int] = {}
+    opens_by_recipient: dict[str, dict[str, int]] = {}
     open_sources: dict[str, list[dict[str, str | int]]] = {}
     for email_id in email_ids:
         meta = client.request("GET", f"/marketing/v3/emails/{email_id}")
@@ -100,11 +100,13 @@ def find_signal_contacts(
                     created = ev.get("created")
                     recipient = normalize_email(ev.get("recipient") or "")
                     if isinstance(created, (int, float)) and created >= lookback_ts and recipient:
-                        open_counts[recipient] = open_counts.get(recipient, 0) + 1
+                        campaign_id_key = str(ecid)
+                        opens_by_recipient.setdefault(recipient, {})
+                        opens_by_recipient[recipient][campaign_id_key] = opens_by_recipient[recipient].get(campaign_id_key, 0) + 1
                         open_sources.setdefault(recipient, []).append(
                             {
                                 "emailId": str(email_id),
-                                "emailCampaignId": str(ecid),
+                                "emailCampaignId": campaign_id_key,
                                 "created": int(created),
                             }
                         )
@@ -147,17 +149,17 @@ def find_signal_contacts(
 
     out: list[SignalContact] = []
     for email, campaign_counts in sorted(opens_by_recipient.items()):
-        trigger_email_campaign_id, open_count = max(
-            campaign_counts.items(),
-            key=lambda item: (item[1], item[0]),
-            default=("", 0),
-        )
-        if open_count < signal_threshold or email not in eligible_by_email:
+        if email not in eligible_by_email:
+            continue
+        trigger_campaign_id, count = max(campaign_counts.items(), key=lambda item: item[1])
+        if count < signal_threshold:
             continue
         contact_id, full_name = eligible_by_email[email]
         LOGGER.debug(
-            "Signal match email=%s openCount=%d sources=%s",
+            "Signal match recipientEmail=%s campaignOpenCounts=%s triggerEmailCampaignId=%s openCount=%d sources=%s",
             email,
+            campaign_counts,
+            trigger_campaign_id,
             count,
             open_sources.get(email, []),
         )
