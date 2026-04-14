@@ -77,7 +77,7 @@ def find_signal_contacts(
         if not after:
             break
 
-    open_counts: dict[str, int] = {}
+    opens_by_recipient: dict[str, dict[str, int]] = {}
     open_sources: dict[str, list[dict[str, str | int]]] = {}
     for email_id in email_ids:
         meta = client.request("GET", f"/marketing/v3/emails/{email_id}")
@@ -99,7 +99,9 @@ def find_signal_contacts(
                     created = ev.get("created")
                     recipient = normalize_email(ev.get("recipient") or "")
                     if isinstance(created, (int, float)) and created >= lookback_ts and recipient:
-                        open_counts[recipient] = open_counts.get(recipient, 0) + 1
+                        recipient_opens = opens_by_recipient.setdefault(recipient, {})
+                        campaign_key = str(ecid)
+                        recipient_opens[campaign_key] = recipient_opens.get(campaign_key, 0) + 1
                         open_sources.setdefault(recipient, []).append(
                             {
                                 "emailId": str(email_id),
@@ -145,7 +147,8 @@ def find_signal_contacts(
         eligible_by_email[email] = (str(c.get("id")), full_name)
 
     out: list[SignalContact] = []
-    for email, count in sorted(open_counts.items()):
+    for email, campaign_counts in sorted(opens_by_recipient.items()):
+        count = sum(campaign_counts.values())
         if count < signal_threshold or email not in eligible_by_email:
             continue
         contact_id, full_name = eligible_by_email[email]
