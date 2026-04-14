@@ -77,8 +77,7 @@ def find_signal_contacts(
         if not after:
             break
 
-    opens_by_recipient: dict[str, dict[str, int]] = {}
-    seen_event_keys: set[str] = set()
+    open_counts: dict[str, int] = {}
     open_sources: dict[str, list[dict[str, str | int]]] = {}
     for email_id in email_ids:
         meta = client.request("GET", f"/marketing/v3/emails/{email_id}")
@@ -91,7 +90,8 @@ def find_signal_contacts(
                 params = {
                     "appId": config.app_id,
                     "emailCampaignId": ecid,
-                    "type": "OPEN",
+                    "eventType": "OPEN",
+                    "excludeFilteredEvents": "true",
                     "limit": 1000,
                     **({"offset": offset} if offset else {}),
                 }
@@ -100,28 +100,7 @@ def find_signal_contacts(
                     created = ev.get("created")
                     recipient = normalize_email(ev.get("recipient") or "")
                     if isinstance(created, (int, float)) and created >= lookback_ts and recipient:
-                        stable_id = ev.get("id") or ev.get("eventId") or ev.get("event_id") or ev.get("uuid")
-                        event_key = None
-                        if stable_id:
-                            event_key = f"{ecid}:{stable_id}"
-                        else:
-                            event_key = ":".join(
-                                [
-                                    recipient,
-                                    str(ecid),
-                                    str(int(created)),
-                                    str(ev.get("sendId") or ""),
-                                    str(ev.get("sentBy") or ""),
-                                    str(ev.get("filteredEvent") or ""),
-                                    str(ev.get("userAgent") or ""),
-                                ]
-                            )
-                        if event_key in seen_event_keys:
-                            continue
-                        seen_event_keys.add(event_key)
-                        recipient_opens = opens_by_recipient.setdefault(recipient, {})
-                        campaign_key = str(ecid)
-                        recipient_opens[campaign_key] = recipient_opens.get(campaign_key, 0) + 1
+                        open_counts[recipient] = open_counts.get(recipient, 0) + 1
                         open_sources.setdefault(recipient, []).append(
                             {
                                 "emailId": str(email_id),
@@ -177,26 +156,11 @@ def find_signal_contacts(
             continue
         contact_id, full_name = eligible_by_email[email]
         LOGGER.debug(
-            (
-                "Signal match recipientEmail=%s "
-                "campaignOpenCounts=%s "
-                "triggerEmailCampaignId=%s "
-                "openCount=%d "
-                "sources=%s"
-            ),
+            "Signal match email=%s openCount=%d sources=%s",
             email,
-            campaign_counts,
-            trigger_email_campaign_id,
-            open_count,
+            count,
             open_sources.get(email, []),
         )
-        out.append(
-            SignalContact(
-                contactId=contact_id,
-                email=email,
-                fullName=full_name,
-                openCount=open_count,
-            )
-        )
+        out.append(SignalContact(contactId=contact_id, email=email, fullName=full_name, openCount=count))
     LOGGER.debug("Signal contacts=%d", len(out))
     return out
