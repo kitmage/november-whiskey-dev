@@ -131,6 +131,12 @@ Expected summary output shape (includes success/failure per segment):
 }
 ```
 
+## Knowledge Base
+
+- `kb/user-guide.md`: Non-technical operator guide.
+- `kb/command-palette.md`: Full command and flag reference for the CLI.
+- `kb/digitalocean-setup.md`: Deployment guide for DigitalOcean.
+
 ## Output Examples
 
 Signal NDJSON:
