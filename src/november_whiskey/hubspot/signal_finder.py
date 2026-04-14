@@ -168,16 +168,23 @@ def find_signal_contacts(
 
     out: list[SignalContact] = []
     for email, campaign_counts in sorted(opens_by_recipient.items()):
-        count = sum(campaign_counts.values())
-        if count < signal_threshold or email not in eligible_by_email:
+        max_single_email_opens = max(campaign_counts.values(), default=0)
+        if max_single_email_opens < signal_threshold or email not in eligible_by_email:
             continue
         contact_id, full_name = eligible_by_email[email]
         LOGGER.debug(
             "Signal match email=%s openCount=%d sources=%s",
             email,
-            count,
+            max_single_email_opens,
             open_sources.get(email, []),
         )
-        out.append(SignalContact(contactId=contact_id, email=email, fullName=full_name, openCount=count))
+        out.append(
+            SignalContact(
+                contactId=contact_id,
+                email=email,
+                fullName=full_name,
+                openCount=max_single_email_opens,
+            )
+        )
     LOGGER.debug("Signal contacts=%d", len(out))
     return out
