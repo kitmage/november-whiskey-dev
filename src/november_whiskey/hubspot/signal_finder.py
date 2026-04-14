@@ -77,7 +77,8 @@ def find_signal_contacts(
         if not after:
             break
 
-    open_counts: dict[str, int] = {}
+    opens_by_recipient: dict[str, dict[str, int]] = {}
+    open_sources: dict[str, list[dict[str, str | int]]] = {}
     for email_id in email_ids:
         meta = client.request("GET", f"/marketing/v3/emails/{email_id}")
         campaign_ids = set(meta.get("allEmailCampaignIds", []))
@@ -89,7 +90,8 @@ def find_signal_contacts(
                 params = {
                     "appId": config.app_id,
                     "emailCampaignId": ecid,
-                    "type": "OPEN",
+                    "eventType": "OPEN",
+                    "excludeFilteredEvents": "true",
                     "limit": 1000,
                     **({"offset": offset} if offset else {}),
                 }
@@ -98,7 +100,16 @@ def find_signal_contacts(
                     created = ev.get("created")
                     recipient = normalize_email(ev.get("recipient") or "")
                     if isinstance(created, (int, float)) and created >= lookback_ts and recipient:
-                        open_counts[recipient] = open_counts.get(recipient, 0) + 1
+                        campaign_id_key = str(ecid)
+                        opens_by_recipient.setdefault(recipient, {})
+                        opens_by_recipient[recipient][campaign_id_key] = opens_by_recipient[recipient].get(campaign_id_key, 0) + 1
+                        open_sources.setdefault(recipient, []).append(
+                            {
+                                "emailId": str(email_id),
+                                "emailCampaignId": campaign_id_key,
+                                "created": int(created),
+                            }
+                        )
                 if not events.get("hasMore"):
                     break
                 offset = events.get("offset")
@@ -128,7 +139,7 @@ def find_signal_contacts(
     for c in contacts:
         props = c.get("properties", {}) or {}
         pci_val = str(props.get(config.property_name, "")).lower()
-        if pci_val in {"pci_started", "pci_completed"}:
+        if pci_val in {"pci_completed"}:
             continue
         email = normalize_email(props.get("email") or "")
         if not email:
@@ -137,10 +148,21 @@ def find_signal_contacts(
         eligible_by_email[email] = (str(c.get("id")), full_name)
 
     out: list[SignalContact] = []
-    for email, count in sorted(open_counts.items()):
-        if count < signal_threshold or email not in eligible_by_email:
+    for email, campaign_counts in sorted(opens_by_recipient.items()):
+        if email not in eligible_by_email:
+            continue
+        trigger_campaign_id, count = max(campaign_counts.items(), key=lambda item: item[1])
+        if count < signal_threshold:
             continue
         contact_id, full_name = eligible_by_email[email]
+        LOGGER.debug(
+            "Signal match recipientEmail=%s campaignOpenCounts=%s triggerEmailCampaignId=%s openCount=%d sources=%s",
+            email,
+            campaign_counts,
+            trigger_campaign_id,
+            count,
+            open_sources.get(email, []),
+        )
         out.append(SignalContact(contactId=contact_id, email=email, fullName=full_name, openCount=count))
     LOGGER.debug("Signal contacts=%d", len(out))
     return out
