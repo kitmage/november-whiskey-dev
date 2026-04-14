@@ -94,3 +94,8 @@ The email was not valid. Correct it and rerun.
 
 - For day-to-day usage issues: contact the operations owner.
 - For system/config changes: contact engineering.
+
+
+## Full command reference
+
+For every command/flag combination, see `kb/command-palette.md`.
