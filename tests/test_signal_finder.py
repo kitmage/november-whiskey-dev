@@ -58,3 +58,74 @@ def test_find_signal_contacts_keeps_pci_started_but_excludes_pci_completed():
     contacts = find_signal_contacts(FakeClient(), config)
     assert [c.email for c in contacts] == ["started@example.com"]
 
+
+def test_find_signal_contacts_deduplicates_duplicate_open_events():
+    class FakeClient:
+        def request(self, method, path, *, params=None, json_body=None):
+            if method == "GET" and path == "/marketing/v3/campaigns/campaign-1/assets/MARKETING_EMAIL":
+                return {"results": [{"id": "email-1"}]}
+            if method == "GET" and path == "/marketing/v3/emails/email-1":
+                return {"allEmailCampaignIds": ["ec-1"]}
+            if method == "GET" and path == "/email/public/v1/events":
+                return {
+                    "events": [
+                        {
+                            "id": "event-1",
+                            "created": 9999999999999,
+                            "recipient": "started@example.com",
+                            "sendId": "send-1",
+                        },
+                        {
+                            "id": "event-1",
+                            "created": 9999999999999,
+                            "recipient": "started@example.com",
+                            "sendId": "send-1",
+                        },
+                        {
+                            "created": 9999999999998,
+                            "recipient": "started@example.com",
+                            "sendId": "send-2",
+                            "filteredEvent": False,
+                            "userAgent": "UA-1",
+                        },
+                        {
+                            "created": 9999999999998,
+                            "recipient": "started@example.com",
+                            "sendId": "send-2",
+                            "filteredEvent": False,
+                            "userAgent": "UA-1",
+                        },
+                    ],
+                    "hasMore": False,
+                }
+            if method == "GET" and path == "/crm/v3/lists/list-1/memberships":
+                return {"results": [{"recordId": "1"}]}
+            if method == "POST" and path == "/crm/v3/objects/contacts/batch/read":
+                _ = json_body
+                return {
+                    "results": [
+                        {
+                            "id": "1",
+                            "properties": {
+                                "email": "started@example.com",
+                                "pci_automation": "pci_started",
+                                "firstname": "Start",
+                                "lastname": "Ed",
+                            },
+                        }
+                    ]
+                }
+            raise AssertionError(f"Unexpected request: {method} {path} {params} {json_body}")
+
+    config = SimpleNamespace(
+        campaign_id="campaign-1",
+        list_id="list-1",
+        lookback_window_hours=24,
+        signal_threshold=1,
+        app_id=2286,
+        property_name="pci_automation",
+    )
+
+    contacts = find_signal_contacts(FakeClient(), config)
+    assert len(contacts) == 1
+    assert contacts[0].openCount == 2
