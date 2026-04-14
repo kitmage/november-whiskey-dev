@@ -168,14 +168,26 @@ def find_signal_contacts(
 
     out: list[SignalContact] = []
     for email, campaign_counts in sorted(opens_by_recipient.items()):
-        max_single_email_opens = max(campaign_counts.values(), default=0)
-        if max_single_email_opens < signal_threshold or email not in eligible_by_email:
+        trigger_email_campaign_id, open_count = max(
+            campaign_counts.items(),
+            key=lambda item: (item[1], item[0]),
+            default=("", 0),
+        )
+        if open_count < signal_threshold or email not in eligible_by_email:
             continue
         contact_id, full_name = eligible_by_email[email]
         LOGGER.debug(
-            "Signal match email=%s openCount=%d sources=%s",
+            (
+                "Signal match recipientEmail=%s "
+                "campaignOpenCounts=%s "
+                "triggerEmailCampaignId=%s "
+                "openCount=%d "
+                "sources=%s"
+            ),
             email,
-            max_single_email_opens,
+            campaign_counts,
+            trigger_email_campaign_id,
+            open_count,
             open_sources.get(email, []),
         )
         out.append(
@@ -183,7 +195,7 @@ def find_signal_contacts(
                 contactId=contact_id,
                 email=email,
                 fullName=full_name,
-                openCount=max_single_email_opens,
+                openCount=open_count,
             )
         )
     LOGGER.debug("Signal contacts=%d", len(out))
