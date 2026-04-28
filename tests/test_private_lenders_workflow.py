@@ -30,7 +30,7 @@ def test_private_lenders_form_submission_includes_pci_datetime_and_teams_url(mon
     monkeypatch.setattr(
         private_lenders,
         "compute_best_start_from_graph",
-        lambda token, graph_cfg, scheduling_cfg, now: AvailabilityResult(
+        lambda token, graph_cfg, scheduling_cfg, now, reserved_starts=None: AvailabilityResult(
             best_start_time=BestStartTime(start="2026-04-14T13:00:00", score=0, buffer_before_blocks=0, buffer_after_blocks=1)
         ),
     )
@@ -68,8 +68,40 @@ def test_private_lenders_no_availability_returns_error_record(monkeypatch):
     monkeypatch.setattr(
         private_lenders,
         "compute_best_start_from_graph",
-        lambda token, graph_cfg, scheduling_cfg, now: AvailabilityResult(best_start_time=None),
+        lambda token, graph_cfg, scheduling_cfg, now, reserved_starts=None: AvailabilityResult(best_start_time=None),
     )
 
     records = private_lenders.run_private_lenders_workflow(cfg, dry_run=False)
     assert records[0]["error_code"] == "no_availability"
+
+
+def test_private_lenders_passes_reserved_starts_between_bookings(monkeypatch):
+    cfg = _config()
+    monkeypatch.setattr(private_lenders, "HubSpotClient", lambda token: SimpleNamespace(token=token))
+    monkeypatch.setattr(
+        private_lenders,
+        "find_signal_contacts",
+        lambda client, hubspot_cfg: [
+            SignalContact(contactId="1", email="john@example.com", fullName="John Doe", openCount=16),
+            SignalContact(contactId="2", email="jane@example.com", fullName="Jane Doe", openCount=17),
+        ],
+    )
+    monkeypatch.setattr(private_lenders, "get_access_token", lambda graph_cfg: "graph-token")
+    reserved_snapshots: list[set[str]] = []
+
+    def _compute_best(token, graph_cfg, scheduling_cfg, now, reserved_starts=None):
+        _ = (token, graph_cfg, scheduling_cfg, now)
+        snapshot = set(reserved_starts or set())
+        reserved_snapshots.append(snapshot)
+        return AvailabilityResult(
+            best_start_time=BestStartTime(start="2026-04-14T13:00:00", score=0, buffer_before_blocks=0, buffer_after_blocks=1)
+        )
+
+    monkeypatch.setattr(private_lenders, "compute_best_start_from_graph", _compute_best)
+    monkeypatch.setattr(private_lenders, "build_event_payload", lambda *args, **kwargs: {"subject": "x"})
+    monkeypatch.setattr(private_lenders, "create_event", lambda token, target_user, payload: {"id": "evt"})
+    monkeypatch.setattr(private_lenders, "submit_contact_form", lambda client, hubspot_cfg, event, dry_run=False: {"ok": True})
+
+    private_lenders.run_private_lenders_workflow(cfg, dry_run=False)
+
+    assert reserved_snapshots == [set(), {"2026-04-14T13:00:00"}]
