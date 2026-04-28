@@ -208,8 +208,8 @@ def load_config() -> AppConfig:
         local_timezone=os.getenv("LOCAL_TIMEZONE", "America/Los_Angeles"),
     )
     users = [x.strip() for x in os.getenv("SCHEDULING_USERS", "").split(",") if x.strip()]
-    if len(users) < 2:
-        raise ConfigError("SCHEDULING_USERS must contain at least two comma-separated users")
+    if len(users) < 1:
+        raise ConfigError("SCHEDULING_USERS must contain at least one user")
     scheduling = SchedulingConfig(
         users=users,
         booking_window_start_hours=_int("BOOKING_WINDOW_START_HOURS", 144),
