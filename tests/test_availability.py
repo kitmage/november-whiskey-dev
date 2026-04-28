@@ -3,6 +3,7 @@ from datetime import datetime
 from november_whiskey.config import SchedulingConfig
 from november_whiskey.graph.availability import (
     build_search_window,
+    exclude_reserved_starts,
     exclude_friday_afternoon,
     exclude_lunch,
     find_mutual_free_ranges,
@@ -98,3 +99,12 @@ def test_scoring_prefers_slots_with_more_free_users():
     assert best is not None
     assert best.start == "2026-01-06T10:30:00"
     assert best.free_user_count == 3
+
+
+def test_exclude_reserved_starts_filters_matching_start_times():
+    slots = [
+        (datetime(2026, 1, 6, 10, 0), datetime(2026, 1, 6, 10, 30)),
+        (datetime(2026, 1, 6, 10, 30), datetime(2026, 1, 6, 11, 0)),
+    ]
+    filtered = exclude_reserved_starts(slots, {"2026-01-06T10:00:00"})
+    assert filtered == [slots[1]]

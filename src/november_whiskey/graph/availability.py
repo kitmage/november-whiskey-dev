@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Iterable
 from zoneinfo import ZoneInfo
 
 from november_whiskey.config import GraphConfig, SchedulingConfig
@@ -93,6 +94,16 @@ def exclude_friday_afternoon(slots: list[tuple[datetime, datetime]], config: Sch
     return [s for s in slots if not (s[0].weekday() == 4 and s[0].hour >= config.friday_afternoon_start_hour)]
 
 
+def exclude_reserved_starts(
+    slots: list[tuple[datetime, datetime]],
+    reserved_starts: Iterable[str] | None,
+) -> list[tuple[datetime, datetime]]:
+    if not reserved_starts:
+        return slots
+    blocked = set(reserved_starts)
+    return [slot for slot in slots if slot[0].isoformat() not in blocked]
+
+
 def count_free_users_by_slot(schedule_views: list[str], start_dt: datetime, interval_minutes: int) -> dict[datetime, int]:
     slot_count = min(len(s) for s in schedule_views)
     return {
@@ -172,7 +183,13 @@ def get_schedule(access_token: str, graph: GraphConfig, scheduling: SchedulingCo
     raise GraphAPIError("Graph getSchedule failed after retries")
 
 
-def compute_best_start_from_graph(access_token: str, graph: GraphConfig, scheduling: SchedulingConfig, now: datetime) -> AvailabilityResult:
+def compute_best_start_from_graph(
+    access_token: str,
+    graph: GraphConfig,
+    scheduling: SchedulingConfig,
+    now: datetime,
+    reserved_starts: Iterable[str] | None = None,
+) -> AvailabilityResult:
     start, end = build_search_window(now, scheduling, graph.local_timezone)
     response = get_schedule(access_token, graph, scheduling, start, end)
     views = parse_schedule_views(response)
@@ -182,5 +199,6 @@ def compute_best_start_from_graph(access_token: str, graph: GraphConfig, schedul
     slots = filter_business_hours(slots, scheduling)
     slots = exclude_lunch(slots, scheduling)
     slots = exclude_friday_afternoon(slots, scheduling)
+    slots = exclude_reserved_starts(slots, reserved_starts)
     free_counts = count_free_users_by_slot(views, start, scheduling.interval_minutes)
     return AvailabilityResult(best_start_time=select_best_start(score_candidate_starts(slots, scheduling.interval_minutes, free_counts)))

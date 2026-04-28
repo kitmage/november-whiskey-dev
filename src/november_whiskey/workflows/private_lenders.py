@@ -39,6 +39,7 @@ def run_private_lenders_workflow(
 
     token = get_access_token(config.graph)
     outputs = []
+    reserved_starts: set[str] = set()
     for i, contact in enumerate(contacts):
         if not validate_email(contact.email):
             output_record = {"contact": contact, "error": f"Invalid contact email: {contact.email}", "error_code": "invalid_email"}
@@ -46,7 +47,13 @@ def run_private_lenders_workflow(
             if on_booking_processed is not None:
                 on_booking_processed(output_record)
             continue
-        availability = compute_best_start_from_graph(token, config.graph, config.scheduling, now=datetime.utcnow().astimezone())
+        availability = compute_best_start_from_graph(
+            token,
+            config.graph,
+            config.scheduling,
+            now=datetime.utcnow().astimezone(),
+            reserved_starts=reserved_starts,
+        )
         if not availability.best_start_time:
             output_record = {"contact": contact, "error": "No mutual availability found", "error_code": "no_availability"}
             outputs.append(output_record)
@@ -68,6 +75,7 @@ def run_private_lenders_workflow(
                 event_result = {"dry_run": True, "event_payload": event_payload}
             else:
                 event_result = create_event(token, config.event.target_calendar_user, event_payload)
+            reserved_starts.add(availability.best_start_time.start)
 
             form_event = {
                 "email": contact.email,
