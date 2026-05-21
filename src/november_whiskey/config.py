@@ -196,7 +196,7 @@ def load_config() -> AppConfig:
         property_name=os.getenv("HUBSPOT_PROPERTY_NAME", "pci_automation"),
         campaign_id=_require("HUBSPOT_CAMPAIGN_ID"),
         lookback_window_hours=_int("HUBSPOT_LOOKBACK_WINDOW_HOURS", 360),
-        signal_threshold=_int("HUBSPOT_SIGNAL_THRESHOLD", 2),
+        signal_threshold=_int("HUBSPOT_SIGNAL_THRESHOLD", 1),
         portal_id=_require("HUBSPOT_PORTAL_ID"),
         form_id=_require("HUBSPOT_FORM_ID"),
     )
